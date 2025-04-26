@@ -308,27 +308,91 @@ async function handleCheckoutSessionCompleted(supabaseClient: any, event: any) {
     
     console.log('Supabase update result:', JSON.stringify(supabaseUpdateResult, null, 2));
     
-    if (supabaseUpdateResult.error) {
-      console.error('Error updating Supabase subscription:', supabaseUpdateResult.error);
-      throw new Error(`Supabase update failed: ${supabaseUpdateResult.error.message}`);
+    // If we have user information, update their subscription status and operations
+    if (session.metadata?.userId || session.metadata?.user_id || session.customer_email) {
+      const userId = session.metadata?.userId || session.metadata?.user_id;
+      
+      // 1. First try to get the user record
+      let userToUpdate;
+      
+      if (userId) {
+        const { data: userData } = await supabaseClient
+          .from('users')
+          .select('id, email')
+          .eq('user_id', userId)
+          .single();
+          
+        if (userData) {
+          userToUpdate = userData;
+        }
+      }
+      
+      // 2. If no user by ID, try by email
+      if (!userToUpdate && session.customer_email) {
+        const { data: userByEmail } = await supabaseClient
+          .from('users')
+          .select('id, email, user_id')
+          .eq('email', session.customer_email)
+          .single();
+          
+        if (userByEmail) {
+          userToUpdate = userByEmail;
+        }
+      }
+      
+      // 3. If we found a user, update their subscription
+      if (userToUpdate) {
+        console.log('Found user to update: ', userToUpdate.id);
+        
+        // Determine plan type and operations allowance
+        let operationsAvailable = 1; // Default (free tier)
+        
+        // Get the price ID from the checkout session or subscription
+        const priceId = session.line_items?.data?.[0]?.price?.id || 
+                        stripeSubscription.items?.data?.[0]?.price?.id;
+        
+        if (priceId) {
+          console.log('Price ID from checkout/subscription:', priceId);
+          
+          // Set operations based on plan type
+          if (priceId.includes('basic')) {
+            operationsAvailable = 100; // Basic plan
+            console.log('Setting Basic plan operations: 100');
+          } else if (priceId.includes('pro')) {
+            operationsAvailable = 500; // Pro plan
+            console.log('Setting Pro plan operations: 500');
+          }
+        }
+        
+        // Update the user record with subscription and operations
+        const userUpdateResult = await supabaseClient
+          .from('users')
+          .update({
+            current_plan_id: subscriptionId,
+            generation_limit: operationsAvailable,
+            generations_used: 0,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', userToUpdate.id);
+          
+        console.log('User update result:', JSON.stringify(userUpdateResult, null, 2));
+      } else {
+        console.log('Could not find user to update subscription for');
+      }
     }
-
+    
     return new Response(
-      JSON.stringify({ 
-        message: "Checkout session completed successfully",
-        subscriptionId 
-      }),
+      JSON.stringify({ message: "Checkout session processed successfully" }),
       { 
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );
+    
   } catch (error) {
-    console.error('Error processing checkout completion:', error);
-    console.error('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
-    console.error('Error stack:', error.stack);
+    console.error('Error processing checkout session:', error);
     return new Response(
-      JSON.stringify({ error: "Failed to process checkout completion", details: error.message }),
+      JSON.stringify({ error: "Failed to process checkout session" }),
       { 
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

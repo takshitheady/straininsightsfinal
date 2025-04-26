@@ -11,7 +11,6 @@ import {
 import {
   Settings,
   User,
-  Zap,
   Shield,
   Database,
   Code,
@@ -24,6 +23,13 @@ import {
   Twitter,
   Instagram,
   X,
+  UploadCloud,
+  FileCheck,
+  TrendingUp,
+  FlaskConical,
+  Clock,
+  BarChart,
+  DollarSign,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../../supabase/auth";
@@ -41,6 +47,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
+import { motion } from "framer-motion";
 
 // Define the Plan type
 interface Plan {
@@ -74,13 +81,52 @@ interface Feature {
   icon: JSX.Element;
 }
 
+// New interface for Hero Stats
+interface HeroStat {
+  title: string;
+  value: string;
+  comparison: string;
+  icon: JSX.Element;
+  iconBgColor: string;
+  iconTextColor: string;
+}
+
+// Animation Variants for Framer Motion
+const fadeIn = {
+  hidden: { opacity: 0, y: 10 },
+  visible: { opacity: 1, y: 0 },
+};
+
+const staggerContainer = {
+  hidden: { opacity: 1 }, // Container itself doesn't fade
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.15, // Time delay between children animating
+    },
+  },
+};
+
+const slideInLeft = {
+  hidden: { opacity: 0, x: -20 },
+  visible: { opacity: 1, x: 0 },
+};
+
+const slideInRight = {
+  hidden: { opacity: 0, x: 20 },
+  visible: { opacity: 1, x: 0 },
+};
+
+// Add this function at the top level, after the interfaces but before the component
+const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
 export default function LandingPage() {
   const { user, signOut } = useAuth();
   const { toast } = useToast();
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [processingPlanId, setProcessingPlanId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -88,8 +134,26 @@ export default function LandingPage() {
   }, []);
 
   const fetchPlans = async () => {
+    setIsLoading(true);
     try {
-      // Use the Supabase client to call the Edge Function
+      // Check if we have cached pricing data
+      const cachedData = localStorage.getItem('pricingPlans');
+      const cachedTimestamp = localStorage.getItem('pricingPlansTimestamp');
+      
+      if (cachedData && cachedTimestamp) {
+        const timestamp = parseInt(cachedTimestamp);
+        const now = Date.now();
+        
+        // If the cache is still valid (less than 24 hours old)
+        if (now - timestamp < CACHE_EXPIRY_TIME) {
+          const parsedData = JSON.parse(cachedData);
+          setPlans(parsedData);
+          setIsLoading(false);
+          return;
+        }
+      }
+      
+      // Cache miss or expired, fetch from API
       const { data, error } = await supabase.functions.invoke(
         "supabase-functions-get-plans",
       );
@@ -98,11 +162,19 @@ export default function LandingPage() {
         throw error;
       }
 
+      // Cache the results
+      if (data) {
+        localStorage.setItem('pricingPlans', JSON.stringify(data));
+        localStorage.setItem('pricingPlansTimestamp', Date.now().toString());
+      }
+
       setPlans(data || []);
       setError("");
     } catch (error) {
       console.error("Failed to fetch plans:", error);
       setError("Failed to load plans. Please try again later.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -180,31 +252,53 @@ export default function LandingPage() {
     return formatter.format(amount / 100);
   };
 
-  // Sample features data
+  // Updated features data to match screenshot
   const features: Feature[] = [
     {
-      title: "Lightning Fast Performance",
+      title: "Instant Data Extraction",
       description:
-        "Built with React and SWC for optimal speed and efficiency in development and production.",
-      icon: <Zap className="h-10 w-10 text-black" />,
+        "AI automatically pulls key data points like cannabinoids, terpenes, contaminants, and more from your COA PDFs in seconds.",
+      icon: <UploadCloud className="h-8 w-8 text-brand-green" />,
     },
     {
-      title: "Secure Authentication",
+      title: "Ensure Compliance",
       description:
-        "Powered by Supabase for robust, scalable authentication and user management.",
-      icon: <Shield className="h-10 w-10 text-black" />,
+        "Quickly verify results against state regulations and internal standards. Flag out-of-spec results immediately.",
+      icon: <FileCheck className="h-8 w-8 text-brand-green" />,
     },
     {
-      title: "Powerful Database",
+      title: "Unlock Insights",
       description:
-        "Leverage Supabase's PostgreSQL database for reliable data storage and retrieval.",
-      icon: <Database className="h-10 w-10 text-black" />,
+        "Analyze trends across batches, suppliers, and strains. Optimize your products and processes with actionable data.",
+      icon: <TrendingUp className="h-8 w-8 text-brand-green" />,
+    },
+  ];
+
+  // New data for Hero statistics cards
+  const heroStats: HeroStat[] = [
+    {
+      title: "Accuracy Improvement",
+      value: "99.5%",
+      comparison: "↑ vs Manual Entry",
+      icon: <BarChart className="h-5 w-5" />,
+      iconBgColor: "bg-green-500/10",
+      iconTextColor: "text-green-400",
     },
     {
-      title: "Modern Tooling",
-      description:
-        "Includes TypeScript, Tailwind CSS, and other modern tools for productive development.",
-      icon: <Code className="h-10 w-10 text-black" />,
+      title: "Time Saved per COA",
+      value: "5 mins",
+      comparison: "↑ Average User",
+      icon: <Clock className="h-5 w-5" />,
+      iconBgColor: "bg-blue-500/10",
+      iconTextColor: "text-blue-400",
+    },
+    {
+      title: "Compliance Risk Reduction",
+      value: "Significant",
+      comparison: "$",
+      icon: <DollarSign className="h-5 w-5" />,
+      iconBgColor: "bg-yellow-500/10",
+      iconTextColor: "text-yellow-400",
     },
   ];
 
@@ -270,555 +364,432 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-100">
+    <div className="min-h-screen bg-brand-dark text-gray-300 font-sans">
       {/* Header */}
-      <header className="fixed top-0 z-50 w-full border-b border-gray-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
-        <div className="container flex h-16 items-center justify-between">
+      <motion.header
+        initial={{ y: -100 }}
+        animate={{ y: 0 }}
+        transition={{ type: "spring", stiffness: 50, damping: 15 }}
+        className="sticky top-0 z-50 w-full h-20 border-b border-white/10 bg-brand-dark/90 backdrop-blur-md"
+      >
+        <div className="container mx-auto px-4 flex h-full items-center justify-between">
+          {/* Logo */}
+          <Link to="/" className="flex items-center">
+            <img
+              src="/headylogo.png"
+              alt="Heady Logo"
+              className="h-12 w-auto"
+            />
+          </Link>
+
+          {/* Navigation (Optional - adapt as needed) */}
+          <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
+            <Link to="/upload" className="text-gray-300 hover:text-white transition-colors">Upload</Link>
+            <a href="#features" className="text-gray-300 hover:text-white transition-colors">Features</a>
+            <a href="#pricing" className="text-gray-300 hover:text-white transition-colors">Pricing</a>
+          </nav>
+
+          {/* Auth Buttons/User Menu */}
           <div className="flex items-center space-x-4">
-            <Link
-              to="/"
-              className="font-bold text-xl flex items-center text-black"
-            >
-              <Zap className="h-6 w-6 mr-2 text-black" />
-              Tempo Starter Kit
-            </Link>
-          </div>
-          <nav className="flex items-center space-x-4">
             {user ? (
-              <div className="flex items-center gap-4">
-                <Link to="/dashboard">
-                  <Button
-                    variant="ghost"
-                    className="text-gray-700 hover:text-black"
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="focus:outline-none"
                   >
-                    Dashboard
-                  </Button>
-                </Link>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      className="gap-2 text-gray-700 hover:text-black"
-                    >
-                      <Avatar className="h-8 w-8">
+                    <Avatar className="h-9 w-9 cursor-pointer ring-2 ring-white/20">
                         <AvatarImage
                           src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`}
-                          alt={user.email || ""}
+                        alt={user.email || "User Avatar"}
                         />
-                        <AvatarFallback>
-                          {user.email?.[0].toUpperCase()}
+                      <AvatarFallback className="bg-gray-700 text-white">
+                        {user.email?.[0].toUpperCase() || "U"}
                         </AvatarFallback>
                       </Avatar>
-                      <span className="hidden md:inline-block">
-                        {user.email}
-                      </span>
-                    </Button>
+                  </motion.button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    className="bg-white border-gray-200"
-                  >
-                    <DropdownMenuLabel className="text-black">
-                      My Account
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator className="bg-gray-200" />
-                    <DropdownMenuItem className="text-gray-700 hover:text-black focus:text-black">
-                      <User className="mr-2 h-4 w-4" />
-                      Profile
+                <DropdownMenuContent align="end" className="bg-gray-800 border-gray-700 text-white">
+                  <DropdownMenuLabel className="font-medium">My Account</DropdownMenuLabel>
+                  <DropdownMenuSeparator className="bg-gray-700" />
+                  <DropdownMenuItem className="hover:bg-gray-700 focus:bg-gray-700 cursor-pointer">
+                    <User className="mr-2 h-4 w-4" /> 
+                    <Link to="/profile" className="w-full">Profile</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="hover:bg-gray-700 focus:bg-gray-700 cursor-pointer">
+                    <Settings className="mr-2 h-4 w-4" /> Settings
                     </DropdownMenuItem>
-                    <DropdownMenuItem className="text-gray-700 hover:text-black focus:text-black">
-                      <Settings className="mr-2 h-4 w-4" />
-                      Settings
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator className="bg-gray-200" />
+                  <DropdownMenuSeparator className="bg-gray-700" />
                     <DropdownMenuItem
                       onSelect={() => signOut()}
-                      className="text-gray-700 hover:text-black focus:text-black"
+                    className="hover:bg-gray-700 focus:bg-gray-700 cursor-pointer text-red-400 focus:text-red-400"
                     >
                       Log out
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </div>
             ) : (
-              <>
                 <Link to="/login">
                   <Button
-                    variant="ghost"
-                    className="text-gray-700 hover:text-black"
+                  variant="outline"
+                  className="text-white bg-white/10 border-white/20 hover:bg-white/20 transition-colors text-sm font-semibold"
                   >
                     Sign In
                   </Button>
                 </Link>
-                <Link to="/signup">
-                  <Button className="bg-black text-white hover:bg-gray-800">
-                    Get Started
-                  </Button>
-                </Link>
-              </>
+              // Optional: Add Sign Up button if needed
+              // <Link to="/signup">
+              //   <Button className="bg-brand-green text-white hover:bg-green-600 font-semibold">Sign Up</Button>
+              // </Link>
             )}
-          </nav>
+          </div>
         </div>
-      </header>
+      </motion.header>
 
       <main>
         {/* Hero Section */}
-        <section className="relative pt-24 pb-16 md:pt-32 md:pb-24">
-          <div className="container px-4 mx-auto">
-            <div className="flex flex-col lg:flex-row items-center gap-12">
-              <div className="lg:w-1/2 space-y-8">
-                <div>
-                  <Badge className="mb-4 bg-gray-200 text-gray-800 hover:bg-gray-300 border-none">
-                    New Release v1.0
-                  </Badge>
-                  <h1 className="text-4xl md:text-6xl font-bold tracking-tight">
-                    Build Faster with Tempo Starter Kit
-                  </h1>
-                </div>
-                <p className="text-lg md:text-xl text-gray-600">
-                  A modern full-stack starter kit with React, Supabase, and
-                  everything you need to build production-ready applications in
-                  record time.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-4">
-                  <Link to="/signup">
+        <section className="relative py-24 md:py-32 lg:py-40 bg-brand-dark text-white overflow-hidden">
+          {/* Adjusted subtle gradient overlay, avoiding blue tones */}
+          <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-b from-brand-dark via-brand-dark to-brand-dark/80 opacity-75"></div>
+          <div className="container mx-auto px-4 z-10 relative">
+            <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+              {/* Left Content */}
+              <motion.div
+                variants={staggerContainer}
+                initial="hidden"
+                animate="visible"
+                className="space-y-8 text-center lg:text-left"
+              >
+                <motion.h1
+                  variants={fadeIn}
+                  className="font-serif font-medium text-5xl md:text-6xl lg:text-7xl tracking-tight"
+                >
+                  The AI-Powered <span className="text-brand-green">StrainInsights</span> Tool
+                </motion.h1>
+                <motion.p
+                  variants={fadeIn}
+                  className="text-lg md:text-xl text-gray-300 leading-relaxed"
+                >
+                  Instantly unlock valuable insights from your lab results. Upload COA
+                  PDFs and let AI handle the data extraction and analysis, streamlining
+                  your compliance and quality control.
+                </motion.p>
+                <motion.div variants={fadeIn}>
+                  <Link to="/upload">
                     <Button
                       size="lg"
-                      className="bg-black text-white hover:bg-gray-800 w-full sm:w-auto"
+                      className="bg-brand-green text-white hover:bg-green-600 font-semibold text-base px-8 py-3 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
                     >
-                      Get Started Free
-                      <ArrowRight className="ml-2 h-4 w-4" />
+                      Go to Upload
+                      <ArrowRight className="ml-2 h-5 w-5" />
                     </Button>
                   </Link>
-                  <Button
-                    variant="outline"
-                    size="lg"
-                    className="border-gray-300 text-gray-700 hover:border-gray-500 hover:text-black w-full sm:w-auto"
-                  >
-                    <Github className="mr-2 h-4 w-4" />
-                    View on GitHub
-                  </Button>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <CheckCircle2 className="h-4 w-4 text-black" />
-                  <span>No credit card required</span>
-                  <Separator
-                    orientation="vertical"
-                    className="h-4 mx-2 bg-gray-300"
-                  />
-                  <CheckCircle2 className="h-4 w-4 text-black" />
-                  <span>Free tier available</span>
-                  <Separator
-                    orientation="vertical"
-                    className="h-4 mx-2 bg-gray-300"
-                  />
-                  <CheckCircle2 className="h-4 w-4 text-black" />
-                  <span>Open source</span>
-                </div>
-              </div>
-              <div className="lg:w-1/2 relative">
-                <div className="absolute -z-10 inset-0 bg-gradient-to-tr from-gray-200/60 via-gray-400/40 to-black/10 rounded-3xl blur-2xl transform scale-110" />
-                <div className="bg-white/80 backdrop-blur-sm border border-gray-200 rounded-xl shadow-xl overflow-hidden">
-                  <div className="p-1 bg-gradient-to-r from-gray-200 via-gray-400 to-black rounded-t-xl">
-                    <div className="flex items-center gap-2 px-3 py-1">
-                      <div className="h-3 w-3 rounded-full bg-red-500" />
-                      <div className="h-3 w-3 rounded-full bg-yellow-500" />
-                      <div className="h-3 w-3 rounded-full bg-green-500" />
-                      <div className="ml-2 text-xs text-black font-medium">
-                        Tempo App
-                      </div>
-                    </div>
+                </motion.div>
+                <motion.div
+                  variants={fadeIn}
+                  className="pt-6 text-sm text-gray-400"
+                >
+                  <span className="font-medium uppercase tracking-wider">Trusted By:</span>
+                  <div className="flex justify-center lg:justify-start space-x-6 mt-4 opacity-70">
+                    {/* Replace with actual logos if available */}
+                    <span>Elastic</span>
+                    <span>VMware</span>
+                    <span>Varonis</span>
+                    <span>Basecamp</span>
                   </div>
-                  <div className="p-6">
-                    <pre className="text-sm text-gray-600 overflow-x-auto">
-                      <code>{`// Sample Lab Report Data Extraction
-{
-  "strain": "Blue Dream",
-  "cannabinoids": {
-    "THC": "18.2%",
-    "CBD": "0.5%",
-    "CBG": "1.2%"
-  },
-  "terpenes": {
-    "Myrcene": "0.58%",
-    "Limonene": "0.31%",
-    "Pinene": "0.29%"
-  },
-  "testDate": "2023-09-15",
-  "labName": "CannaLab Testing"
-}`}</code>
-                    </pre>
+                </motion.div>
+              </motion.div>
+
+              {/* Right Metrics Cards */}
+              <motion.div
+                variants={staggerContainer}
+                initial="hidden"
+                animate="visible"
+                className="grid grid-cols-1 gap-6"
+              >
+                {heroStats.map((stat) => (
+                  <motion.div key={stat.title} variants={slideInRight}>
+                    <Card className="bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl overflow-hidden">
+                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium text-gray-300">
+                          {stat.title}
+                        </CardTitle>
+                        <div className={`p-1.5 rounded-md ${stat.iconBgColor} ${stat.iconTextColor}`}>
+                          {stat.icon}
                   </div>
-                </div>
-              </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className={`text-2xl font-bold ${stat.iconTextColor}`}>{stat.value}</div>
+                        <p className="text-xs text-gray-400 mt-1">{stat.comparison}</p>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </motion.div>
             </div>
           </div>
-
-          {/* Gradient orbs */}
-          <div className="absolute top-1/4 left-0 -z-10 h-[300px] w-[300px] rounded-full bg-gray-200/60 blur-[100px]" />
-          <div className="absolute bottom-0 right-0 -z-10 h-[300px] w-[300px] rounded-full bg-gray-400/40 blur-[100px]" />
         </section>
 
         {/* Features Section */}
-        <section className="py-16 md:py-24 bg-gray-50">
-          <div className="container px-4 mx-auto">
-            <div className="text-center mb-16">
-              <Badge className="mb-4 bg-gray-200 text-gray-800 hover:bg-gray-300 border-none">
-                Features
-              </Badge>
-              <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4 text-black">
-                Everything You Need to Build Modern Apps
+        <section id="features" className="py-20 md:py-28 lg:py-32 bg-brand-dark">
+          <div className="container mx-auto px-4">
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.5 }}
+              variants={fadeIn}
+              className="text-center mb-16 lg:mb-20"
+            >
+              <h2 className="font-serif font-medium text-4xl md:text-5xl lg:text-6xl tracking-tight text-white mb-4">
+                The Proven Choice For Cannabis Data Extraction
               </h2>
-              <p className="text-gray-600 max-w-[700px] mx-auto">
-                Tempo Starter Kit combines the best tools and practices to help
-                you build production-ready applications with minimal setup.
-              </p>
-            </div>
+              {/* Optional: Add subtitle if needed */}
+              {/* <p className="text-lg text-gray-600 max-w-2xl mx-auto">Brief description of features.</p> */}
+            </motion.div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-              {features.map((feature, index) => (
-                <Card
-                  key={index}
-                  className="border-gray-200 bg-gradient-to-b from-white to-gray-50 shadow-md hover:shadow-lg transition-shadow"
+            <motion.div
+              variants={staggerContainer}
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, amount: 0.2 }}
+              className="grid grid-cols-1 md:grid-cols-3 gap-8 lg:gap-12"
+            >
+              {features.map((feature) => (
+                <motion.div
+                  key={feature.title}
+                  variants={fadeIn}
+                  whileHover={{ scale: 1.03, y: -5, transition: { type: "spring", stiffness: 300, damping: 15 } }}
+                  className="text-center p-8 bg-white/5 rounded-xl shadow-xl border border-white/10 cursor-pointer backdrop-blur-sm"
                 >
-                  <CardHeader>
-                    <div className="mb-4">{feature.icon}</div>
-                    <CardTitle className="text-black">
+                  <div className="inline-flex items-center justify-center p-3 bg-brand-green/10 rounded-full mb-6 shadow-sm">
+                    {feature.icon}
+                  </div>
+                  <h3 className="text-xl font-semibold text-white mb-3">
                       {feature.title}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-gray-600">{feature.description}</p>
-                  </CardContent>
-                </Card>
+                  </h3>
+                  <p className="text-gray-400 text-sm leading-relaxed">
+                    {feature.description}
+                  </p>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
+
+            {/* Optional: Button below features */}
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, amount: 0.5 }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+              variants={fadeIn}
+              className="text-center mt-16 lg:mt-20"
+            >
+              <Link to="/upload">
+                <Button
+                  size="lg"
+                  className="bg-brand-green text-white hover:bg-green-600 font-semibold text-base px-8 py-3 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
+                >
+                  Go to Upload
+                  <ArrowRight className="ml-2 h-5 w-5" />
+                </Button>
+              </Link>
+            </motion.div>
           </div>
         </section>
 
-        {/* Pricing Section */}
-        <section className="py-16 md:py-24 bg-white">
-          <div className="container px-4 mx-auto">
-            <div className="text-center mb-16">
-              <Badge className="mb-4 bg-gray-200 text-gray-800 hover:bg-gray-300 border-none">
-                Pricing
-              </Badge>
-              <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4 text-black">
-                Simple, Transparent Pricing
-              </h2>
-              <p className="text-gray-600 max-w-[700px] mx-auto">
-                Choose the perfect plan for your needs. All plans include access
-                to our core features. No hidden fees or surprises.
-              </p>
-            </div>
+        {/* Updated Pricing Section */}
+        <section id="pricing" className="py-20 md:py-28 lg:py-32 bg-brand-dark">
+          <div className="container mx-auto px-4">
+            <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.3 }} transition={{ duration: 0.5 }} variants={fadeIn} className="text-center mb-16 lg:mb-20">
+              <Badge className="mb-4 bg-white/10 text-brand-green border-none font-semibold px-3 py-1">Pricing</Badge>
+              <h2 className="font-serif font-medium text-4xl md:text-5xl lg:text-6xl tracking-tight text-white mb-4">Simple, Transparent Pricing</h2>
+              <p className="text-lg text-gray-300 max-w-2xl mx-auto">Choose the perfect plan. No hidden fees.</p>
+            </motion.div>
 
             {error && (
-              <div
-                className="bg-red-100 border border-red-200 text-red-800 px-4 py-3 rounded relative mb-6"
-                role="alert"
-              >
-                <span className="block sm:inline">{error}</span>
-                <button
-                  className="absolute top-0 bottom-0 right-0 px-4 py-3"
-                  onClick={() => setError("")}
-                >
-                  <span className="sr-only">Dismiss</span>
-                  <X className="h-4 w-4" />
-                </button>
+              <div className="bg-red-900/50 border border-red-500/30 text-red-300 px-4 py-3 rounded relative mb-8 text-center" role="alert">
+                <span>{error}</span>
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {plans.map((plan) => (
-                <Card
-                  key={plan.id}
-                  className="flex flex-col h-full border-gray-200 bg-gradient-to-b from-white to-gray-50 shadow-lg hover:shadow-xl transition-all"
-                >
+            <motion.div variants={staggerContainer} initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {isLoading ? (
+                // Prettier loading state with skeleton cards
+                Array.from({ length: 3 }).map((_, index) => (
+                  <motion.div key={`skeleton-${index}`} variants={fadeIn}>
+                    <Card className="flex flex-col h-full bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl overflow-hidden animate-pulse">
+                      <CardHeader className="pb-4">
+                        <div className="h-4 w-24 bg-white/10 rounded mb-4"></div>
+                        <div className="mt-4">
+                          <div className="h-8 w-32 bg-white/10 rounded"></div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="flex-grow">
+                        <Separator className="my-4 bg-white/10" />
+                        <div className="space-y-3">
+                          {Array.from({ length: 4 }).map((_, i) => (
+                            <div key={i} className="flex items-start">
+                              <div className="h-5 w-5 rounded-full bg-white/10 mr-2 flex-shrink-0"></div>
+                              <div className="h-4 w-full bg-white/10 rounded"></div>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                      <CardFooter className="mt-4">
+                        <div className="h-10 w-full bg-white/10 rounded"></div>
+                      </CardFooter>
+                    </Card>
+                  </motion.div>
+                ))
+              ) : plans.length > 0 ? plans.map((plan) => (
+                <motion.div key={plan.id} variants={fadeIn}>
+                  <Card className="flex flex-col h-full bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl hover:border-white/20 transition-colors">
                   <CardHeader className="pb-4">
-                    <CardDescription className="text-sm text-gray-600">
-                      {plan.interval_count === 1
-                        ? "Monthly"
-                        : `Every ${plan.interval_count} ${plan.interval}s`}
+                      <CardDescription className="text-sm text-gray-400 uppercase tracking-wider">
+                        {plan.product.split('_').pop()}
                     </CardDescription>
                     <div className="mt-4">
-                      <span className="text-4xl font-bold text-black">
-                        {formatCurrency(plan.amount, plan.currency)}
-                      </span>
-                      <span className="text-gray-600">/{plan.interval}</span>
+                        <span className="text-4xl font-bold text-white">{formatCurrency(plan.amount, plan.currency)}</span>
+                        <span className="text-gray-400">/{plan.interval}</span>
                     </div>
                   </CardHeader>
                   <CardContent className="flex-grow">
-                    <Separator className="my-4 bg-gray-200" />
+                      <Separator className="my-4 bg-white/10" />
                     <ul className="space-y-3">
                       {getPlanFeatures(plan.product).map((feature, index) => (
-                        <li
-                          key={index}
-                          className="flex items-start text-gray-700"
-                        >
-                          <CheckCircle2 className="h-5 w-5 text-black mr-2 flex-shrink-0 mt-0.5" />
+                          <li key={index} className="flex items-start text-gray-300">
+                            <CheckCircle2 className="h-5 w-5 text-brand-green mr-2 flex-shrink-0 mt-0.5" />
                           <span>{feature}</span>
                         </li>
                       ))}
                     </ul>
                   </CardContent>
-                  <CardFooter>
+                    <CardFooter className="mt-4">
                     <Button
-                      className="w-full bg-black text-white hover:bg-gray-800"
+                        className={`w-full font-semibold ${plan.product.includes('PRO') ? 'bg-brand-green text-white hover:bg-green-600 shadow-lg hover:shadow-brand-green/30' : 'bg-white/10 text-white hover:bg-white/20'}`}
                       onClick={() => handleCheckout(plan.id)}
-                      disabled={isLoading}
-                    >
-                      {isLoading && processingPlanId === plan.id ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Processing...
-                        </>
-                      ) : (
-                        <>
-                          Subscribe Now
-                          <ChevronRight className="ml-1 h-4 w-4" />
-                        </>
-                      )}
+                        disabled={isLoading && processingPlanId === plan.id}
+                      >
+                        {isLoading && processingPlanId === plan.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (plan.product.includes('PRO') ? 'Get Started' : 'Choose Plan')}
                     </Button>
                   </CardFooter>
                 </Card>
-              ))}
-            </div>
+                </motion.div>
+              )) : (
+                <p className="text-center text-gray-400 md:col-span-2 lg:col-span-3">No pricing plans available at this time.</p>
+              )}
+            </motion.div>
           </div>
         </section>
 
         {/* Testimonials Section */}
-        <section className="py-16 md:py-24 bg-gray-50">
-          <div className="container px-4 mx-auto">
-            <div className="text-center mb-16">
-              <Badge className="mb-4 bg-gray-200 text-gray-800 hover:bg-gray-300 border-none">
-                Testimonials
-              </Badge>
-              <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4 text-black">
-                Loved by Developers
-              </h2>
-              <p className="text-gray-600 max-w-[700px] mx-auto">
-                See what our users have to say about Tempo Starter Kit.
-              </p>
-            </div>
+        <section id="testimonials" className="py-20 md:py-28 lg:py-32 bg-brand-dark">
+          <div className="container mx-auto px-4">
+            <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.3 }} transition={{ duration: 0.5 }} variants={fadeIn} className="text-center mb-16 lg:mb-20">
+              <Badge className="mb-4 bg-white/10 text-brand-green border-none font-semibold px-3 py-1">Testimonials</Badge>
+              <h2 className="font-serif font-medium text-4xl md:text-5xl lg:text-6xl tracking-tight text-white mb-4">Trusted by Industry Leaders</h2>
+            </motion.div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <motion.div variants={staggerContainer} initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }} className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {testimonials.map((testimonial) => (
-                <Card
-                  key={testimonial.id}
-                  className="border-gray-200 bg-gradient-to-b from-white to-gray-50 shadow-md"
-                >
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center gap-4">
-                      <Avatar>
-                        <AvatarImage
-                          src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${testimonial.avatar}`}
-                          alt={testimonial.name}
-                        />
-                        <AvatarFallback>{testimonial.name[0]}</AvatarFallback>
+                <motion.div key={testimonial.id} variants={fadeIn}>
+                  <Card className="h-full bg-white/5 backdrop-blur-sm border border-white/10 shadow-lg p-6">
+                    <CardHeader className="pb-4 px-0 pt-0">
+                      <div className="flex items-center gap-4 mb-4">
+                        <Avatar className="ring-2 ring-white/10">
+                          <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${testimonial.name}`} alt={testimonial.name} />
+                          <AvatarFallback className="bg-gray-700 text-gray-300">{testimonial.name[0]}</AvatarFallback>
                       </Avatar>
                       <div>
-                        <CardTitle className="text-base text-black">
-                          {testimonial.name}
-                        </CardTitle>
-                        <CardDescription className="text-gray-600">
-                          {testimonial.role} at {testimonial.company}
-                        </CardDescription>
+                          <CardTitle className="text-base font-semibold text-white">{testimonial.name}</CardTitle>
+                          <CardDescription className="text-gray-400 text-sm">{testimonial.role} at {testimonial.company}</CardDescription>
+                        </div>
                       </div>
+                      <div className="flex text-yellow-400">
+                        {[...Array(5)].map((_, i) => <Star key={i} className="h-4 w-4 fill-current" />)}
                     </div>
                   </CardHeader>
-                  <CardContent>
-                    <div className="flex mb-2">
-                      {[...Array(5)].map((_, i) => (
-                        <Star
-                          key={i}
-                          className="h-4 w-4 fill-black text-black"
-                        />
-                      ))}
-                    </div>
-                    <p className="text-gray-600">{testimonial.content}</p>
+                    <CardContent className="px-0 pb-0">
+                      <p className="text-gray-300 italic before:content-['\201C'] after:content-['\201D']">{testimonial.content}</p>
                   </CardContent>
                 </Card>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           </div>
         </section>
 
         {/* CTA Section */}
-        <section className="py-16 md:py-24">
-          <div className="container px-4 mx-auto">
-            <div className="bg-gradient-to-r from-gray-100 to-white rounded-3xl p-8 md:p-12 shadow-xl border border-gray-200">
-              <div className="max-w-3xl mx-auto text-center">
-                <h2 className="text-3xl md:text-4xl font-bold mb-6 text-black">
-                  Ready to Start Building?
-                </h2>
-                <p className="text-lg md:text-xl mb-8 text-gray-600">
-                  Join thousands of developers who are already building amazing
-                  products with Tempo Starter Kit.
-                </p>
-                <div className="flex flex-col sm:flex-row justify-center gap-4">
-                  <Link to="/signup">
-                    <Button
-                      size="lg"
-                      className="bg-black text-white hover:bg-gray-800 w-full sm:w-auto"
-                    >
-                      Get Started Free
+        <section className="py-20 md:py-28 lg:py-32 bg-brand-dark">
+          <div className="container mx-auto px-4">
+            <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.6 }} variants={fadeIn} className="bg-white/5 backdrop-blur-sm rounded-2xl p-10 md:p-16 shadow-xl border border-white/10 text-center">
+              <h2 className="font-serif text-3xl md:text-4xl lg:text-5xl font-medium mb-6 text-white">Ready to Streamline Your Lab Results?</h2>
+              <p className="text-lg md:text-xl mb-10 text-gray-300 max-w-2xl mx-auto">Start leveraging AI for faster, more accurate COA analysis today.</p>
+              <Link to="/upload">
+                <Button size="lg" className="bg-brand-green text-white hover:bg-green-600 font-semibold text-base px-10 py-3 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30">
+                  Get Started (Upload)
                     </Button>
                   </Link>
-                  <Button
-                    variant="outline"
-                    size="lg"
-                    className="border-gray-300 text-gray-700 hover:border-gray-500 hover:text-black w-full sm:w-auto"
-                  >
-                    View Documentation
-                  </Button>
-                </div>
-              </div>
-            </div>
+            </motion.div>
           </div>
         </section>
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 py-12">
-        <div className="container px-4 mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+      <footer className="bg-brand-dark border-t border-white/10 py-12 text-gray-400">
+        <div className="container mx-auto px-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+            {/* Column 1: Logo & Socials */}
             <div>
-              <Link
-                to="/"
-                className="font-bold text-xl flex items-center mb-4 text-black"
-              >
-                <Zap className="h-5 w-5 mr-2 text-black" />
-                Tempo
+              <Link to="/" className="flex items-center mb-4">
+                <img src="/headylogo.png" alt="Heady Logo" className="h-9 w-auto opacity-90" />
               </Link>
-              <p className="text-gray-600 mb-4">
-                A modern full-stack starter kit for building web applications
-                quickly and efficiently.
-              </p>
+              <p className="text-sm mb-4 pr-4">AI-Powered COA analysis for the cannabis industry.</p>
               <div className="flex space-x-4">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="rounded-full text-gray-600 hover:text-black"
-                >
-                  <Github className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="rounded-full text-gray-600 hover:text-black"
-                >
-                  <Twitter className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="rounded-full text-gray-600 hover:text-black"
-                >
-                  <Instagram className="h-5 w-5" />
-                </Button>
+                <a href="#" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-white transition-colors"><Github className="h-5 w-5" /></a>
+                <a href="#" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-white transition-colors"><Twitter className="h-5 w-5" /></a>
+                <a href="#" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-white transition-colors"><Instagram className="h-5 w-5" /></a>
               </div>
             </div>
-
+            {/* Column 2, 3, 4: Links (Example) */}
             <div>
-              <h3 className="font-medium text-lg mb-4 text-black">Product</h3>
-              <ul className="space-y-3">
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Features
-                  </Link>
-                </li>
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Pricing
-                  </Link>
-                </li>
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Changelog
-                  </Link>
-                </li>
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Roadmap
-                  </Link>
-                </li>
+              <h3 className="font-semibold text-sm text-white uppercase tracking-wider mb-4">Product</h3>
+              <ul className="space-y-3 text-sm">
+                <li><a href="#features" className="hover:text-white transition-colors">Features</a></li>
+                <li><a href="#pricing" className="hover:text-white transition-colors">Pricing</a></li>
+                {/* Add more links */}
               </ul>
             </div>
-
             <div>
-              <h3 className="font-medium text-lg mb-4 text-black">Resources</h3>
-              <ul className="space-y-3">
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Documentation
-                  </Link>
-                </li>
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Tutorials
-                  </Link>
-                </li>
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Blog
-                  </Link>
-                </li>
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Support
-                  </Link>
-                </li>
+              <h3 className="font-semibold text-sm text-white uppercase tracking-wider mb-4">Resources</h3>
+              <ul className="space-y-3 text-sm">
+                <li><Link to="#" className="hover:text-white transition-colors">Documentation</Link></li>
+                <li><Link to="#" className="hover:text-white transition-colors">Blog</Link></li>
+                {/* Add more links */}
               </ul>
             </div>
-
             <div>
-              <h3 className="font-medium text-lg mb-4 text-black">Company</h3>
-              <ul className="space-y-3">
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    About
-                  </Link>
-                </li>
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Careers
-                  </Link>
-                </li>
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Privacy Policy
-                  </Link>
-                </li>
-                <li>
-                  <Link to="#" className="text-gray-600 hover:text-black">
-                    Terms of Service
-                  </Link>
-                </li>
+              <h3 className="font-semibold text-sm text-white uppercase tracking-wider mb-4">Company</h3>
+              <ul className="space-y-3 text-sm">
+                <li><Link to="#" className="hover:text-white transition-colors">About Us</Link></li>
+                <li><Link to="#" className="hover:text-white transition-colors">Contact</Link></li>
+                {/* Add more links */}
               </ul>
             </div>
           </div>
-
-          <Separator className="my-8 bg-gray-200" />
-
-          <div className="flex flex-col md:flex-row justify-between items-center">
-            <p className="text-sm text-gray-600">
-              © {new Date().getFullYear()} Tempo Starter Kit. All rights
-              reserved.
-            </p>
-            <div className="flex space-x-4 mt-4 md:mt-0">
-              <Link to="#" className="text-sm text-gray-600 hover:text-black">
-                Privacy
-              </Link>
-              <Link to="#" className="text-sm text-gray-600 hover:text-black">
-                Terms
-              </Link>
-              <Link to="#" className="text-sm text-gray-600 hover:text-black">
-                Cookies
-              </Link>
+          {/* Bottom Footer */}
+          <Separator className="my-8 bg-white/10" />
+          <div className="flex flex-col md:flex-row justify-between items-center text-sm">
+            <p>&copy; {new Date().getFullYear()} Heady. All rights reserved.</p>
+            <div className="flex space-x-6 mt-4 md:mt-0">
+              <Link to="#" className="hover:text-white transition-colors">Privacy Policy</Link>
+              <Link to="#" className="hover:text-white transition-colors">Terms of Service</Link>
             </div>
           </div>
         </div>
       </footer>
+      {/* Toaster should remain outside footer if it's globally positioned */}
       <Toaster />
     </div>
   );

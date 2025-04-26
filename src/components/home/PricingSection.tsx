@@ -14,6 +14,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../../../supabase/auth";
 import { supabase } from "../../../supabase/supabase";
 import { useToast } from "@/components/ui/use-toast";
+import { initiateCheckout } from "@/lib/stripeUtils"; // Import the new function
 
 // Define the Plan type
 interface Plan {
@@ -27,14 +28,55 @@ interface Plan {
   product: string;
   created: number;
   livemode: boolean;
+  nickname?: string;
   [key: string]: any;
 }
 
-export default function PricingSection() {
+// Props for the PricingSection component
+interface PricingSectionProps {
+  title?: string;
+  subtitle?: string;
+  plansToShow?: string[]; // Array of Stripe Price IDs to display (optional)
+  planFeatures?: Record<string, string[]>; // Map Price ID to features array (optional)
+  theme?: 'light' | 'dark'; // Optional theme prop
+  checkoutFunction?: typeof initiateCheckout; // Allow passing the checkout function
+  excludePlanId?: string; // <<< Add new optional prop
+}
+
+// Updated default features (less specific, more generic)
+const defaultPlanFeatures = {
+  basic: [
+    "Core application features",
+    "Standard processing",
+    "Community support",
+  ],
+  pro: [
+    "All Basic features",
+    "Priority processing",
+    "Enhanced analytics",
+    "Priority support",
+  ],
+  enterprise: [
+    "All Pro features",
+    "Dedicated support",
+    "Custom integrations",
+    "SLA guarantees",
+  ],
+};
+
+export default function PricingSection({
+  title = "Simple, Transparent Pricing",
+  subtitle = "Choose the perfect plan for your needs. All plans include access to our core features. No hidden fees or surprises.",
+  plansToShow,
+  planFeatures: overridePlanFeatures, // Rename prop for clarity
+  theme = 'light', // Default to light theme
+  checkoutFunction = initiateCheckout, // Use imported function by default
+  excludePlanId // <<< Destructure the new prop
+}: PricingSectionProps) {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const [plans, setPlans] = useState<Plan[]>([]);
+  const [allPlans, setAllPlans] = useState<Plan[]>([]); // Store all fetched plans
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [processingPlanId, setProcessingPlanId] = useState<string | null>(null);
@@ -44,85 +86,46 @@ export default function PricingSection() {
   }, []);
 
   const fetchPlans = async () => {
+    setIsLoading(true); // Set loading true for fetching plans
     try {
-      // Use the Supabase client to call the Edge Function
       const { data, error } = await supabase.functions.invoke(
         "supabase-functions-get-plans",
       );
-
-      if (error) {
-        throw error;
-      }
-
-      setPlans(data || []);
+      if (error) throw error;
+      setAllPlans(data || []);
       setError("");
     } catch (error) {
       console.error("Failed to fetch plans:", error);
       setError("Failed to load plans. Please try again later.");
+    } finally {
+      setIsLoading(false); // Set loading false after fetching plans
     }
   };
 
-  // Handle checkout process
-  const handleCheckout = async (priceId: string) => {
-    if (!user) {
-      // Redirect to login if user is not authenticated
-      toast({
-        title: "Authentication required",
-        description: "Please sign in to subscribe to a plan.",
-        variant: "default",
-      });
-      window.location.href = "/login?redirect=pricing";
-      return;
-    }
+  // --- Updated Filtering Logic --- 
+  const displayedPlans = allPlans.filter(plan => {
+    // Condition 1: Must not be the excluded plan ID
+    const isExcluded = excludePlanId && plan.id === excludePlanId;
+    if (isExcluded) return false;
 
-    setIsLoading(true);
-    setProcessingPlanId(priceId);
-    setError("");
+    // Condition 2: If plansToShow is provided, it must be in that list
+    const includedInShowList = !plansToShow || plansToShow.includes(plan.id);
+    return includedInShowList;
+  });
+  // --- End Updated Filtering Logic --- 
 
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "supabase-functions-create-checkout",
-        {
-          body: {
-            price_id: priceId,
-            user_id: user.id,
-            return_url: `${window.location.origin}/dashboard`,
-          },
-          headers: {
-            "X-Customer-Email": user.email || "",
-          },
-        },
-      );
-
-      if (error) {
-        throw error;
-      }
-
-      // Redirect to Stripe checkout
-      if (data?.url) {
-        toast({
-          title: "Redirecting to checkout",
-          description:
-            "You'll be redirected to Stripe to complete your purchase.",
-          variant: "default",
-        });
-        window.location.href = data.url;
-      } else {
-        throw new Error("No checkout URL returned");
-      }
-    } catch (error) {
-      console.error("Error creating checkout session:", error);
-      setError("Failed to create checkout session. Please try again.");
-      toast({
-        title: "Checkout failed",
-        description:
-          "There was an error creating your checkout session. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-      setProcessingPlanId(null);
-    }
+  // Use passed checkout function
+  const handleCheckout = (priceId: string) => {
+    checkoutFunction({
+      priceId,
+      user,
+      supabase,
+      toast,
+      setIsLoading, // Pass state setters for button state
+      setError,
+      setProcessingPlanId,
+      // Default return path is /dashboard in initiateCheckout
+    });
   };
 
   // Format currency
@@ -136,51 +139,67 @@ export default function PricingSection() {
     return formatter.format(amount / 100);
   };
 
-  // Plan features
-  const getPlanFeatures = (planType: string) => {
-    const basicFeatures = [
-      "Core application features",
-      "Basic authentication",
-      "1GB storage",
-      "Community support",
-    ];
-
-    const proFeatures = [
-      ...basicFeatures,
-      "Advanced analytics",
-      "Priority support",
-      "10GB storage",
-      "Custom branding",
-    ];
-
-    const enterpriseFeatures = [
-      ...proFeatures,
-      "Dedicated account manager",
-      "Custom integrations",
-      "Unlimited storage",
-      "SLA guarantees",
-    ];
-
-    if (planType.includes("PRO")) return proFeatures;
-    if (planType.includes("ENTERPRISE")) return enterpriseFeatures;
-    return basicFeatures;
+  // Determine features to display
+  const getFeaturesForPlan = (planId: string, planProduct: string) => {
+    // Prioritize override features if provided
+    if (overridePlanFeatures && overridePlanFeatures[planId]) {
+      return overridePlanFeatures[planId];
+    }
+    // Fallback to default features based on product name
+    if (planProduct.toLowerCase().includes("enterprise")) return defaultPlanFeatures.enterprise;
+    if (planProduct.toLowerCase().includes("pro")) return defaultPlanFeatures.pro;
+    return defaultPlanFeatures.basic; // Default to basic
   };
 
+  // --- Refined Theme Styles --- 
+  const sectionClasses = theme === 'light' ? "bg-white text-gray-800" : "bg-transparent text-gray-300";
+  // Lighter border, softer shadow for light cards
+  const cardClasses = theme === 'light' ? "border border-gray-100 bg-white shadow-md hover:shadow-lg rounded-xl" : "bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl hover:border-white/20 rounded-lg"; 
+  // Slightly softer title black for light theme
+  const titleClasses = theme === 'light' ? "text-gray-900" : "text-white"; 
+  const subtitleClasses = theme === 'light' ? "text-gray-500" : "text-gray-400"; 
+  const featureTextClasses = theme === 'light' ? "text-gray-700" : "text-gray-300";
+  // Use brand green for checkmarks in light theme
+  const featureIconClasses = theme === 'light' ? "text-brand-green" : "text-brand-green"; 
+  // Lighter separator for light theme
+  const separatorClasses = theme === 'light' ? "bg-gray-100" : "bg-white/10"; 
+  
+  // Modernized Button Styles for Light Theme
+  const buttonClasses = (planId: string) => {
+    const plan = allPlans.find(p => p.id === planId);
+    const isPro = plan?.product.toLowerCase().includes('pro'); // Check if it's the Pro plan (adjust if needed)
+
+    if (theme === 'light') {
+      // Primary button (Pro plan): Brand green
+      if (isPro) {
+        return "bg-brand-green text-white hover:bg-green-600 shadow-sm hover:shadow-md";
+      }
+      // Secondary button (Other plans): Light gray / subtle
+      return "bg-gray-100 text-gray-800 hover:bg-gray-200 border border-gray-200 shadow-sm";
+    } else {
+      // Keep existing dark theme logic (or refine if needed)
+      return isPro 
+        ? 'bg-brand-green text-white hover:bg-green-600 shadow-lg hover:shadow-brand-green/30' 
+        : 'bg-white/10 text-white hover:bg-white/20';
+    }
+  };
+  // --- End Refined Theme Styles --- 
+
   return (
-    <section className="py-16 md:py-24 bg-white">
+    // Removed outer py- padding, let the dialog handle padding
+    <section className={`${sectionClasses}`}>
+      {/* Removed container and text-center block, assuming dialog provides structure */}
+      {/* 
       <div className="container px-4 mx-auto">
         <div className="text-center mb-16">
-          <Badge className="mb-4 bg-gray-200 text-gray-800 hover:bg-gray-300 border-none">
-            Pricing
-          </Badge>
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4 text-black">
-            Simple, Transparent Pricing
+          <h2 className={`text-3xl md:text-4xl font-bold tracking-tight mb-4 ${titleClasses}`}>
+            {title} 
           </h2>
-          <p className="text-gray-600 max-w-[700px] mx-auto">
-            Choose the perfect plan for your needs. All plans include access to
-            our core features. No hidden fees or surprises.
+          <p className={`max-w-[700px] mx-auto ${subtitleClasses}`}>
+            {subtitle}
           </p>
         </div>
+      */}
 
         {error && (
           <div
@@ -198,59 +217,65 @@ export default function PricingSection() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {plans.map((plan) => (
+        {isLoading && displayedPlans.length === 0 && (
+            <div className="flex justify-center items-center h-40">
+                <Loader2 className={`h-8 w-8 animate-spin ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`} />
+            </div>
+        )}
+
+        {!isLoading && displayedPlans.length === 0 && !error && (
+             <p className={`text-center ${subtitleClasses}`}>No pricing plans available at this time.</p>
+        )}
+
+        {/* Adjusted grid columns for dialog context (often looks better with fewer cols) */} 
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {displayedPlans.map((plan) => (
             <Card
               key={plan.id}
-              className="flex flex-col h-full border-gray-200 bg-gradient-to-b from-white to-gray-50 shadow-lg hover:shadow-xl transition-all"
-            >
-              <CardHeader className="pb-4">
-                <CardDescription className="text-sm text-gray-600">
-                  {plan.interval_count === 1
-                    ? "Monthly"
-                    : `Every ${plan.interval_count} ${plan.interval}s`}
+              // Added rounded-xl to match common dialog styles
+              className={`flex flex-col h-full transition-all ${cardClasses}`}>
+              <CardHeader className="pb-4 pt-6 px-6">
+                <CardDescription className={`text-sm font-medium ${subtitleClasses}`}>
+                  {/* Use nickname or format product name */} 
+                  {plan.nickname || plan.product?.split('_').pop()?.replace(' Plan', '').toUpperCase() || 'Plan'}
                 </CardDescription>
-                <div className="mt-4">
-                  <span className="text-4xl font-bold text-black">
+                <div className="mt-2">
+                  <span className={`text-4xl font-bold ${titleClasses}`}>
                     {formatCurrency(plan.amount, plan.currency)}
                   </span>
-                  <span className="text-gray-600">/{plan.interval}</span>
+                  <span className={`text-sm ml-1 ${subtitleClasses}`}>/{plan.interval}</span>
                 </div>
               </CardHeader>
-              <CardContent className="flex-grow">
-                <Separator className="my-4 bg-gray-200" />
+              <CardContent className="flex-grow px-6">
+                <Separator className={`my-4 ${separatorClasses}`} />
                 <ul className="space-y-3">
-                  {getPlanFeatures(plan.product).map((feature, index) => (
-                    <li key={index} className="flex items-start text-gray-700">
-                      <CheckCircle2 className="h-5 w-5 text-black mr-2 flex-shrink-0 mt-0.5" />
+                  {getFeaturesForPlan(plan.id, plan.product).map((feature, index) => (
+                    <li key={index} className={`flex items-start text-sm ${featureTextClasses}`}>
+                      <CheckCircle2 className={`h-4 w-4 mr-2.5 flex-shrink-0 mt-0.5 ${featureIconClasses}`} />
                       <span>{feature}</span>
                     </li>
                   ))}
                 </ul>
               </CardContent>
-              <CardFooter>
+              <CardFooter className="px-6 pb-6 mt-4">
                 <Button
-                  className="w-full bg-black text-white hover:bg-gray-800"
+                  className={`w-full font-semibold py-3 rounded-lg ${buttonClasses(plan.id)}`}
                   onClick={() => handleCheckout(plan.id)}
-                  disabled={isLoading}
+                  disabled={isLoading || (processingPlanId !== null && processingPlanId !== plan.id)}
                 >
                   {isLoading && processingPlanId === plan.id ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Processing...
-                    </>
+                    <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
-                    <>
-                      Subscribe Now
-                      <ChevronRight className="ml-1 h-4 w-4" />
-                    </>
+                     // Simple button text 
+                    'Choose Plan' 
                   )}
                 </Button>
               </CardFooter>
             </Card>
           ))}
         </div>
-      </div>
+      {/* Removed closing container div */}
+      {/* </div> */}
     </section>
   );
 }

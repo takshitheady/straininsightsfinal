@@ -34,17 +34,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string, fullName: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
+  const signUp = async (email: string, password: string, fullName: string): Promise<void> => {
+    try {
+      console.log("Attempting signup with:", { email, fullName });
+      
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+          },
         },
-      },
-    });
-    if (error) throw error;
+      });
+      
+      if (error) {
+        console.error("Supabase auth signUp error:", error);
+        throw error;
+      }
+      
+      // Check if user is created but in email confirmation state
+      if (data?.user?.identities?.length === 0) {
+        throw new Error("This email is already registered. Please log in instead.");
+      }
+
+      console.log("Signup successful:", data);
+    } catch (error) {
+      console.error("Error in signUp function:", error);
+      throw error;
+    }
   };
 
   const signIn = async (email: string, password: string) => {
