@@ -218,7 +218,7 @@ async function handleSubscriptionDeleted(supabaseClient: any, event: any) {
     if (subscription?.metadata?.email) {
       await supabaseClient
         .from("users")
-        .update({ subscription: null })
+        .update({ current_plan_id: null })
         .eq("email", subscription.metadata.email);
     }
 
@@ -342,42 +342,80 @@ async function handleCheckoutSessionCompleted(supabaseClient: any, event: any) {
       
       // 3. If we found a user, update their subscription
       if (userToUpdate) {
-        console.log('Found user to update: ', userToUpdate.id);
-        
-        // Determine plan type and operations allowance
-        let operationsAvailable = 1; // Default (free tier)
-        
-        // Get the price ID from the checkout session or subscription
-        const priceId = session.line_items?.data?.[0]?.price?.id || 
-                        stripeSubscription.items?.data?.[0]?.price?.id;
-        
-        if (priceId) {
-          console.log('Price ID from checkout/subscription:', priceId);
-          
-          // Set operations based on plan type
-          if (priceId.includes('basic')) {
-            operationsAvailable = 100; // Basic plan
-            console.log('Setting Basic plan operations: 100');
-          } else if (priceId.includes('pro')) {
-            operationsAvailable = 500; // Pro plan
-            console.log('Setting Pro plan operations: 500');
+        console.log(`Found user ${userToUpdate.id} to update.`);
+
+        // Determine plan name and generation limit based on STATUS and AMOUNT
+        let planNameForUser = 'free'; // Default
+        let generationLimit = 1;      // Default
+        const subscriptionStatus = stripeSubscription.status;
+        const subscriptionAmount = stripeSubscription.items?.data?.[0]?.plan?.amount; // Amount in cents
+
+        console.log(`Subscription ${subscriptionId} status: ${subscriptionStatus}, amount: ${subscriptionAmount}`);
+
+        if (subscriptionStatus === 'active' || subscriptionStatus === 'trialing') { // Consider active or trialing as valid plans
+          if (subscriptionAmount === 1500) { // Basic Plan Amount (e.g., $15.00)
+            planNameForUser = 'basic';
+            generationLimit = 100;
+            console.log('Identified Basic plan based on amount (1500). Setting limit: 100');
+          } else if (subscriptionAmount === 3500) { // Pro Plan Amount (e.g., $35.00)
+            planNameForUser = 'pro';
+            generationLimit = 500;
+            console.log('Identified Pro plan based on amount (3500). Setting limit: 500');
+          } else {
+            console.warn(`Subscription ${subscriptionId} is active but amount (${subscriptionAmount}) doesn't match known plans (1500 or 3500). Defaulting to free plan values.`);
+            // Keep default 'free' and limit 1 if amount doesn't match
           }
+        } else {
+            console.warn(`Subscription ${subscriptionId} status is '${subscriptionStatus}'. Not updating user to a paid plan. Defaulting to free plan values.`);
+            // Keep default 'free' and limit 1 if status is not active/trialing
         }
-        
-        // Update the user record with subscription and operations
-        const userUpdateResult = await supabaseClient
-          .from('users')
-          .update({
-            current_plan_id: subscriptionId,
-            generation_limit: operationsAvailable,
-            generations_used: 0,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', userToUpdate.id);
-          
-        console.log('User update result:', JSON.stringify(userUpdateResult, null, 2));
+
+        // Log before update attempt
+        console.log(`Preparing to update user ${userToUpdate.id}: set current_plan_id='${planNameForUser}', generation_limit=${generationLimit}`);
+
+        // Update the user record
+        try {
+          const userUpdateResult = await supabaseClient
+            .from('users')
+            .update({
+              current_plan_id: planNameForUser, // Set the plan name ('basic', 'pro', 'free')
+              generation_limit: generationLimit,
+              generations_used: 0, // Reset usage on plan change
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', userToUpdate.id); // Match on the UUID primary key
+
+            console.log('Standard user update result:', JSON.stringify(userUpdateResult, null, 2));
+
+            if (userUpdateResult.error) {
+              console.error(`Standard Supabase update failed for user ${userToUpdate.id}:`, userUpdateResult.error);
+
+              // Fall back to direct SQL function - ensure it accepts plan name
+              console.log('Falling back to direct SQL update function update_user_plan...');
+              const { error: sqlError } = await supabaseClient.rpc(
+                'update_user_plan',
+                {
+                  user_id_param: userToUpdate.id,
+                  plan_id_param: planNameForUser, // Pass the determined plan name
+                  limit_param: generationLimit
+                }
+              );
+
+              if (sqlError) {
+                console.error(`SQL function update_user_plan also failed for user ${userToUpdate.id}:`, sqlError);
+                throw new Error(`Failed to update user record via standard or SQL method: ${sqlError.message}`);
+              } else {
+                console.log(`User record ${userToUpdate.id} updated successfully via SQL fallback.`);
+              }
+            } else {
+              console.log(`User record ${userToUpdate.id} updated successfully via standard update.`);
+            }
+        } catch (updateError) {
+          console.error(`Exception during user update attempts for user ${userToUpdate.id}:`, updateError);
+          // Still return 200 to Stripe, but log the critical failure
+        }
       } else {
-        console.log('Could not find user to update subscription for');
+        console.log(`Could not find user record to update plan details for session ${session.id}.`);
       }
     }
     

@@ -124,7 +124,7 @@ export default function PricingSection({
       setIsLoading, // Pass state setters for button state
       setError,
       setProcessingPlanId,
-      // Default return path is /dashboard in initiateCheckout
+      // Default return path is /profile in initiateCheckout
     });
   };
 

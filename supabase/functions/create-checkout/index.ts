@@ -34,12 +34,13 @@ serve(async (req) => {
         },
       ],
       mode: 'subscription',
-      success_url: `${return_url}?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${return_url}?canceled=true`,
+      success_url: `${new URL(return_url).origin}/profile`,
+      cancel_url: `${new URL(return_url).origin}/profile?canceled=true`,
       customer_email: req.headers.get('X-Customer-Email'),
       metadata: {
         user_id,
       },
+      expand: ['line_items.data.price.product'],
     });
 
     return new Response(

@@ -202,7 +202,7 @@ export default function LandingPage() {
           body: {
             price_id: priceId,
             user_id: user.id,
-            return_url: `${window.location.origin}/dashboard`,
+            return_url: `${window.location.origin}/profile`,
           },
           headers: {
             "X-Customer-Email": user.email || "",
@@ -414,9 +414,9 @@ export default function LandingPage() {
                   <DropdownMenuLabel className="font-medium">My Account</DropdownMenuLabel>
                   <DropdownMenuSeparator className="bg-gray-700" />
                   <DropdownMenuItem className="hover:bg-gray-700 focus:bg-gray-700 cursor-pointer">
-                    <User className="mr-2 h-4 w-4" /> 
+                      <User className="mr-2 h-4 w-4" />
                     <Link to="/profile" className="w-full">Profile</Link>
-                  </DropdownMenuItem>
+                    </DropdownMenuItem>
                   <DropdownMenuItem className="hover:bg-gray-700 focus:bg-gray-700 cursor-pointer">
                     <Settings className="mr-2 h-4 w-4" /> Settings
                     </DropdownMenuItem>

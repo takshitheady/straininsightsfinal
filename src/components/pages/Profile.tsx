@@ -113,7 +113,8 @@ const ProfilePage = () => {
         let subscriptionStatus = "active";
         let currentPeriodEnd = undefined;
         
-        if (userData?.current_plan_id) {
+        // Check for a paid plan - if current_plan_id exists and is not 'free'
+        if (userData?.current_plan_id && userData.current_plan_id !== 'free') {
           const { data: subscriptionData, error: subscriptionError } = await supabase
             .from('subscriptions')
             .select('*')
