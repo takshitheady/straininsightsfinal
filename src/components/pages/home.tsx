@@ -392,13 +392,13 @@ export default function LandingPage() {
           {/* Auth Buttons/User Menu */}
           <div className="flex items-center space-x-4">
             {user ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     className="focus:outline-none"
-                  >
+                    >
                     <Avatar className="h-9 w-9 cursor-pointer ring-2 ring-white/20">
                         <AvatarImage
                           src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`}
@@ -670,7 +670,7 @@ export default function LandingPage() {
                         className={`w-full font-semibold ${plan.product.includes('PRO') ? 'bg-brand-green text-white hover:bg-green-600 shadow-lg hover:shadow-brand-green/30' : 'bg-white/10 text-white hover:bg-white/20'}`}
                       onClick={() => handleCheckout(plan.id)}
                         disabled={isLoading && processingPlanId === plan.id}
-                      >
+                    >
                         {isLoading && processingPlanId === plan.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (plan.product.includes('PRO') ? 'Get Started' : 'Choose Plan')}
                     </Button>
                   </CardFooter>

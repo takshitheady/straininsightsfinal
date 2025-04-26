@@ -257,8 +257,8 @@ const OutputHistory = () => {
           <Search className="absolute top-1/2 transform -translate-y-1/2 left-3 h-5 w-5 text-gray-500" />
         </motion.div>
 
-        {loading ? (
-          <div className="flex items-center justify-center h-64">
+          {loading ? (
+            <div className="flex items-center justify-center h-64">
             <motion.div 
               animate={{ rotate: 360 }}
               transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
@@ -266,8 +266,8 @@ const OutputHistory = () => {
               <FileText className="h-10 w-10 text-brand-green" />
             </motion.div>
             <p className="ml-3 text-gray-400">Loading your analysis history...</p>
-          </div>
-        ) : outputs.length === 0 ? (
+            </div>
+          ) : outputs.length === 0 ? (
           <motion.div 
             variants={fadeIn}
             className="flex flex-col items-center justify-center h-64 text-center"
@@ -294,7 +294,7 @@ const OutputHistory = () => {
             <Search className="h-12 w-12 text-gray-500 mb-4" />
             <h3 className="text-xl font-medium text-white">
               No results found
-            </h3>
+              </h3>
             <p className="text-gray-400 mt-2 max-w-md">
               We couldn't find any reports matching "{searchQuery}". Try a different search term.
             </p>
@@ -306,7 +306,7 @@ const OutputHistory = () => {
               Clear Search
             </Button>
           </motion.div>
-        ) : (
+          ) : (
           <motion.div 
             variants={staggerContainer}
             initial="hidden"
@@ -315,7 +315,7 @@ const OutputHistory = () => {
           >
             {filteredOutputs.map((output) => (
               <motion.div
-                key={output.id}
+                  key={output.id}
                 variants={fadeIn}
               >
                 <Card className="overflow-hidden bg-white/5 border-white/10 shadow-lg transition-all hover:shadow-xl hover:shadow-brand-green/5 hover:border-white/20">
@@ -323,12 +323,12 @@ const OutputHistory = () => {
                     <div className="flex justify-between items-start">
                       <div>
                         <CardTitle className="text-lg text-white">
-                          {output.file_name}
-                        </CardTitle>
+                      {output.file_name}
+                    </CardTitle>
                         <CardDescription className="flex items-center gap-1 text-gray-400">
                           <Clock className="h-3.5 w-3.5" />
                           {getRelativeTime(output.created_at)}
-                        </CardDescription>
+                    </CardDescription>
                       </div>
                       <Badge className="bg-brand-green text-white border-none">
                         COA
@@ -364,7 +364,7 @@ const OutputHistory = () => {
                   </CardFooter>
                 </Card>
               </motion.div>
-            ))}
+              ))}
           </motion.div>
         )}
       </div>
@@ -433,7 +433,7 @@ const OutputHistory = () => {
                 >
                   Close
                 </Button>
-              </div>
+            </div>
             </>
           )}
         </DialogContent>

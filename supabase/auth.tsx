@@ -39,14 +39,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log("Attempting signup with:", { email, fullName });
       
       const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-          },
+      email,
+      password,
+      options: {
+        data: {
+          full_name: fullName,
         },
-      });
+      },
+    });
       
       if (error) {
         console.error("Supabase auth signUp error:", error);

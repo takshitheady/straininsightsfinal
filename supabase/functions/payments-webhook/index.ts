@@ -418,7 +418,7 @@ async function handleCheckoutSessionCompleted(supabaseClient: any, event: any) {
         console.log(`Could not find user record to update plan details for session ${session.id}.`);
       }
     }
-    
+
     return new Response(
       JSON.stringify({ message: "Checkout session processed successfully" }),
       { 

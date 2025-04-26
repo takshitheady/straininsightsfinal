@@ -112,6 +112,11 @@ const UploadPage = () => {
     }
   }, [user, supabase]);
 
+  // Trigger fetchUsageData on mount and when user changes
+  useEffect(() => {
+    fetchUsageData();
+  }, [fetchUsageData]);
+
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
