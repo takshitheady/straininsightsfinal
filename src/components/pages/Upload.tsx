@@ -307,7 +307,7 @@ const UploadPage = () => {
     // return () => { /* clear timeout if active */ }; 
   }, [currentLabResultId, uploadStatus]); // Dependencies are correct
 
-  const uploadToSupabase = async (file: File): Promise<{ success: boolean; error?: string; labResultId?: string; }> => {
+  const uploadToSupabase = async (file: File, isLongAnalysis: boolean = false): Promise<{ success: boolean; error?: string; labResultId?: string; }> => {
     if (!user) {
       return { success: false, error: "You must be logged in to upload files." };
     }
@@ -430,7 +430,7 @@ const UploadPage = () => {
 
       // Trigger processing via Edge Function
       const { error: functionError } = await supabase.functions.invoke(
-        'process-lab-result',
+        isLongAnalysis ? 'process-lab-result-long' : 'process-lab-result',
         {
           body: {
             pdfStoragePath: storagePath,
@@ -513,7 +513,8 @@ const UploadPage = () => {
 
 
     try {
-      const uploadResult = await uploadToSupabase(file);
+      // Call uploadToSupabase with isLongAnalysis=false for the short version
+      const uploadResult = await uploadToSupabase(file, false);
 
       clearInterval(progressInterval); 
 
@@ -563,6 +564,102 @@ const UploadPage = () => {
       });
 
       console.error("Error in handleUpload:", err);
+    }
+  };
+
+  // New function for handling the long version upload
+  const handleUploadLong = async () => {
+    // Check limit before starting upload process
+    if (isLoadingUsage) {
+        toast({ title: "Please wait", description: "Verifying usage limits...", duration: 2000 });
+        return;
+    }
+    // Use local calculation for check as state might not be updated yet
+    const currentUsageCheck = generationsUsed ?? 0;
+    const currentLimitCheck = generationLimit ?? 1; // Use 1 if limit is null
+
+    if (currentUsageCheck >= currentLimitCheck) {
+        setError(`You have reached your generation limit (${currentLimitCheck}). Please upgrade your plan to process more files.`);
+        toast({ title: "Generation Limit Reached", description: "Upgrade your plan to continue.", variant: "destructive" });
+        setUploadStatus('failed'); // Set status to failed to show appropriate UI
+        return;
+    }
+
+    if (!file) {
+      setError("Please select a file.");
+      return;
+    }
+
+    if (!user) { // Keep user check here as well
+      setError("You must be logged in to upload files.");
+      return;
+    }
+
+    setUploadStatus('uploading');
+    setUploadProgress(0);
+    setError(null);
+    setGeneratedDescription('');
+
+    toast({
+      title: "Upload started",
+      description: "Uploading your Certificate of Analysis for extended analysis...",
+      duration: 3000,
+    });
+
+    // Simulate upload progress visually
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        progress = Math.min(progress + 10, 90); // Simulate progress up to 90%
+        setUploadProgress(progress);
+        if (progress >= 90) {
+            clearInterval(progressInterval);
+        }
+    }, 150);
+
+    try {
+      // Call uploadToSupabase with isLongAnalysis=true for the long version
+      const uploadResult = await uploadToSupabase(file, true);
+
+      clearInterval(progressInterval); 
+
+      if (!uploadResult.success || !uploadResult.labResultId) {
+        // Failure during the synchronous part (upload, DB insert, usage update)
+        setUploadProgress(0); 
+        setError(uploadResult.error || "Upload failed before processing could start");
+        setUploadStatus('failed');
+        toast({
+            title: "Upload Failed",
+            description: uploadResult.error || "An error occurred before processing.",
+            variant: "destructive",
+            duration: 5000,
+          });
+        return; 
+      }
+      
+      // Now, set frontend status to 'processing' to initiate polling via useEffect
+      setUploadProgress(100); // Show upload as complete
+      setUploadStatus('processing'); 
+
+      toast({
+        title: "Upload successful",
+        description: "Extended processing started. We'll fetch the detailed results shortly.",
+        duration: 4000,
+      });
+
+    } catch (err: any) { // Catch unexpected errors in handleUploadLong itself
+      clearInterval(progressInterval);
+      setError(err.message || "Upload process failed unexpectedly.");
+      setUploadStatus('failed');
+      setUploadProgress(0);
+
+      toast({
+        title: "Upload failed",
+        description: err.message || "There was an unexpected error. Please try again.",
+        variant: "destructive",
+        duration: 5000,
+      });
+
+      console.error("Error in handleUploadLong:", err);
     }
   };
 
@@ -825,26 +922,34 @@ const UploadPage = () => {
                       <p className="text-sm text-gray-300 mt-1 break-all max-w-full">{file.name}</p>
                       <p className="text-xs text-gray-400 mt-1">{(file.size / 1024).toFixed(2)} KB</p>
                     </div>
-                    <div className="flex gap-3 mt-2">
+                    <div className="flex flex-wrap gap-3 mt-2 justify-center">
                       <Button
                         onClick={handleUpload}
                         className="bg-brand-green text-white hover:bg-green-600 font-semibold shadow-lg hover:shadow-brand-green/30 disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={isUploadDisabled} // Use the combined disabled state
                       >
                         <UploadCloud className="mr-2 h-5 w-5" />
-                        Extract COA Data
+                        Extract COA Data (Short)
                       </Button>
-                <Button
-                  variant="outline"
+                      <Button
+                        onClick={handleUploadLong}
+                        className="bg-brand-green text-white hover:bg-green-600 font-semibold shadow-lg hover:shadow-brand-green/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isUploadDisabled} // Use the combined disabled state
+                      >
+                        <UploadCloud className="mr-2 h-5 w-5" />
+                        Extract COA Data (Long)
+                      </Button>
+                      <Button
+                        variant="outline"
                         onClick={clearFile}
                         className="text-gray-300 border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                         // Disable clear only if actively uploading/processing
                         disabled={isUploadingOrProcessing}
-                >
+                      >
                         <X className="mr-2 h-5 w-5" />
                         Clear
-                </Button>
-              </div>
+                      </Button>
+                    </div>
                     {/* Show loading/limit state here too? Maybe not necessary if button is disabled */}
                   </div>
                 </motion.div>
