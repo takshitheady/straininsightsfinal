@@ -43,18 +43,24 @@ interface PricingSectionProps {
   excludePlanId?: string; // <<< Add new optional prop
 }
 
-// Updated default features (less specific, more generic)
+// Custom plan names mapping - SC9FWWIFZ7QDCM, SC9FJQGAEZLGH5
+const planNames = {
+  'SC9FWWIFZ7QDCM': 'Premium Plan',
+  'SC9FJQGAEZLGH5': 'Basic Plan'
+};
+
+// Updated default features with the new requested items
 const defaultPlanFeatures = {
   basic: [
-    "Core application features",
-    "Standard processing",
-    "Community support",
+    "100 Generations/Month",
+    "1 GB Storage",
+    "Basic Authentication"
   ],
   pro: [
-    "All Basic features",
-    "Priority processing",
-    "Enhanced analytics",
-    "Priority support",
+    "500 Generations/Month",
+    "2 GB Storage",
+    "Authentication + Latest Improvements",
+    "Community Support"
   ],
   enterprise: [
     "All Pro features",
@@ -92,6 +98,7 @@ export default function PricingSection({
         "supabase-functions-get-plans",
       );
       if (error) throw error;
+      console.log("Plans data in PricingSection:", data);
       setAllPlans(data || []);
       setError("");
     } catch (error) {
@@ -145,6 +152,22 @@ export default function PricingSection({
     if (overridePlanFeatures && overridePlanFeatures[planId]) {
       return overridePlanFeatures[planId];
     }
+    
+    // Use price-based determination to ensure consistency
+    const plan = allPlans.find(p => p.id === planId);
+    if (plan?.amount === 1500) {
+      return defaultPlanFeatures.basic; // $15 plan (Basic)
+    } else if (plan?.amount === 3500) {
+      return defaultPlanFeatures.pro; // $35 plan (Premium)
+    }
+    
+    // For our specific plan IDs as fallback
+    if (planId === 'SC9FJQGAEZLGH5') {
+      return defaultPlanFeatures.basic; // Basic Plan
+    } else if (planId === 'SC9FWWIFZ7QDCM') {
+      return defaultPlanFeatures.pro; // Premium Plan
+    }
+    
     // Fallback to default features based on product name
     if (planProduct.toLowerCase().includes("enterprise")) return defaultPlanFeatures.enterprise;
     if (planProduct.toLowerCase().includes("pro")) return defaultPlanFeatures.pro;
@@ -236,8 +259,8 @@ export default function PricingSection({
               className={`flex flex-col h-full transition-all ${cardClasses}`}>
               <CardHeader className="pb-4 pt-6 px-6">
                 <CardDescription className={`text-sm font-medium ${subtitleClasses}`}>
-                  {/* Use nickname or format product name */} 
-                  {plan.nickname || plan.product?.split('_').pop()?.replace(' Plan', '').toUpperCase() || 'Plan'}
+                  {/* Use price-based determination for plan names */}
+                  {plan.amount === 1500 ? "Basic Plan" : plan.amount === 3500 ? "Premium Plan" : planNames[plan.id] || plan.nickname || plan.product?.split('_').pop()?.replace(' Plan', '').toUpperCase() || 'Plan'}
                 </CardDescription>
                 <div className="mt-2">
                   <span className={`text-4xl font-bold ${titleClasses}`}>

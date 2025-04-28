@@ -129,6 +129,12 @@ export default function LandingPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [processingPlanId, setProcessingPlanId] = useState<string | null>(null);
 
+  // Custom plan names mapping
+  const planNames = {
+    'SC9FWWIFZ7QDCM': 'Basic Plan',
+    'SC9FJQGAEZLGH5': 'Premium Plan'
+  };
+
   useEffect(() => {
     fetchPlans();
   }, []);
@@ -148,6 +154,7 @@ export default function LandingPage() {
         if (now - timestamp < CACHE_EXPIRY_TIME) {
           const parsedData = JSON.parse(cachedData);
           setPlans(parsedData);
+          console.log("Plans from cache:", parsedData);
           setIsLoading(false);
           return;
         }
@@ -164,6 +171,7 @@ export default function LandingPage() {
 
       // Cache the results
       if (data) {
+        console.log("Plans from API:", data);
         localStorage.setItem('pricingPlans', JSON.stringify(data));
         localStorage.setItem('pricingPlansTimestamp', Date.now().toString());
       }
@@ -261,9 +269,9 @@ export default function LandingPage() {
       icon: <UploadCloud className="h-8 w-8 text-brand-green" />,
     },
     {
-      title: "Ensure Compliance",
+      title: "SEO-Ready Content",
       description:
-        "Quickly verify results against state regulations and internal standards. Flag out-of-spec results immediately.",
+        "Generate SEO-friendly descriptions ready to use on your website, social media, and marketing materials. Boost your online presence instantly.",
       icon: <FileCheck className="h-8 w-8 text-brand-green" />,
     },
     {
@@ -293,9 +301,9 @@ export default function LandingPage() {
       iconTextColor: "text-blue-400",
     },
     {
-      title: "Compliance Risk Reduction",
-      value: "Significant",
-      comparison: "$",
+      title: "SEO Engagement Boost",
+      value: "75%",
+      comparison: "↑ Click-Through Rate",
       icon: <DollarSign className="h-5 w-5" />,
       iconBgColor: "bg-yellow-500/10",
       iconTextColor: "text-yellow-400",
@@ -335,19 +343,34 @@ export default function LandingPage() {
 
   // Plan features
   const getPlanFeatures = (planType: string) => {
+    // Plan features for specific plan IDs
+    if (planType === 'SC9FWWIFZ7QDCM') {
+      return [
+        "100 Generations/Month",
+        "1 GB Storage",
+        "Basic Authentication"
+      ];
+    } else if (planType === 'SC9FJQGAEZLGH5') {
+      return [
+        "500 Generations/Month",
+        "2 GB Storage",
+        "Authentication + Latest Improvements",
+        "Community Support"
+      ];
+    }
+    
+    // Default fallback features
     const basicFeatures = [
-      "Core application features",
-      "Basic authentication",
-      "1GB storage",
-      "Community support",
+      "100 Generations/Month",
+      "1 GB Storage",
+      "Basic Authentication"
     ];
 
     const proFeatures = [
-      ...basicFeatures,
-      "Advanced analytics",
-      "Priority support",
-      "10GB storage",
-      "Custom branding",
+      "500 Generations/Month",
+      "2 GB Storage",
+      "Authentication + Latest Improvements",
+      "Community Support"
     ];
 
     const enterpriseFeatures = [
@@ -490,13 +513,13 @@ export default function LandingPage() {
                   variants={fadeIn}
                   className="pt-6 text-sm text-gray-400"
                 >
-                  <span className="font-medium uppercase tracking-wider">Trusted By:</span>
-                  <div className="flex justify-center lg:justify-start space-x-6 mt-4 opacity-70">
+                  <span className="font-semibold uppercase tracking-wider text-white text-base">Trusted By:</span>
+                  <div className="flex justify-center lg:justify-start space-x-8 mt-6 opacity-90">
                     {/* Replace with actual logos if available */}
-                    <span>Elastic</span>
-                    <span>VMware</span>
-                    <span>Varonis</span>
-                    <span>Basecamp</span>
+                    <span className="text-gray-200 font-medium text-lg hover:text-white transition-colors">nuEra</span>
+                    <span className="text-gray-200 font-medium text-lg hover:text-white transition-colors">RawGarden</span>
+                    <span className="text-gray-200 font-medium text-lg hover:text-white transition-colors">HighHaven</span>
+                    <span className="text-gray-200 font-medium text-lg hover:text-white transition-colors">Binske&Oni</span>
                   </div>
                 </motion.div>
               </motion.div>
@@ -613,10 +636,10 @@ export default function LandingPage() {
               </div>
             )}
 
-            <motion.div variants={staggerContainer} initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <motion.div variants={staggerContainer} initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8 max-w-4xl mx-auto">
               {isLoading ? (
                 // Prettier loading state with skeleton cards
-                Array.from({ length: 3 }).map((_, index) => (
+                Array.from({ length: 2 }).map((_, index) => (
                   <motion.div key={`skeleton-${index}`} variants={fadeIn}>
                     <Card className="flex flex-col h-full bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl overflow-hidden animate-pulse">
                       <CardHeader className="pb-4">
@@ -647,7 +670,7 @@ export default function LandingPage() {
                   <Card className="flex flex-col h-full bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl hover:border-white/20 transition-colors">
                   <CardHeader className="pb-4">
                       <CardDescription className="text-sm text-gray-400 uppercase tracking-wider">
-                        {plan.product.split('_').pop()}
+                        {plan.amount === 1500 ? "Basic Plan" : "Premium Plan"}
                     </CardDescription>
                     <div className="mt-4">
                         <span className="text-4xl font-bold text-white">{formatCurrency(plan.amount, plan.currency)}</span>
@@ -657,7 +680,16 @@ export default function LandingPage() {
                   <CardContent className="flex-grow">
                       <Separator className="my-4 bg-white/10" />
                     <ul className="space-y-3">
-                      {getPlanFeatures(plan.product).map((feature, index) => (
+                      {(plan.amount === 1500 ? [
+                        "100 Generations/Month",
+                        "1 GB Storage",
+                        "Basic Authentication"
+                      ] : [
+                        "500 Generations/Month",
+                        "2 GB Storage",
+                        "Authentication + Latest Improvements",
+                        "Community Support"
+                      ]).map((feature, index) => (
                           <li key={index} className="flex items-start text-gray-300">
                             <CheckCircle2 className="h-5 w-5 text-brand-green mr-2 flex-shrink-0 mt-0.5" />
                           <span>{feature}</span>

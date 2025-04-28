@@ -63,6 +63,7 @@ const UploadPage = () => {
   const [currentUserPlanId, setCurrentUserPlanId] = useState<string | null>(null);
   const [isLoadingUsage, setIsLoadingUsage] = useState(true);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
+  const [hasManuallyClosedDialog, setHasManuallyClosedDialog] = useState(false);
 
   // Fetch user's usage data from database
   const fetchUsageData = useCallback(async () => {
@@ -683,17 +684,28 @@ const UploadPage = () => {
 
   // Show upgrade dialog when limit is reached
   useEffect(() => {
-    if (limitReached && !isLoadingUsage) { // Ensure usage isn't loading before showing
+    if (limitReached && !isLoadingUsage && !hasManuallyClosedDialog) { 
+      // Only show dialog if limit is reached AND user hasn't manually closed it before
       const timer = setTimeout(() => {
         setShowUpgradeDialog(true);
       }, 500);
       return () => clearTimeout(timer);
     }
-    // Close dialog if limit is no longer reached (e.g., plan updated)
-    if (!limitReached && showUpgradeDialog) {
-      setShowUpgradeDialog(false);
+    
+    // Reset the manual flag if limit is no longer reached (e.g., plan upgraded)
+    if (!limitReached) {
+      setHasManuallyClosedDialog(false);
     }
-  }, [limitReached, isLoadingUsage, showUpgradeDialog]);
+  }, [limitReached, isLoadingUsage, hasManuallyClosedDialog]);
+
+  // Handle dialog close - mark as manually closed
+  const handleDialogOpenChange = (open: boolean) => {
+    setShowUpgradeDialog(open);
+    if (!open) {
+      // When user closes dialog, mark as manually closed
+      setHasManuallyClosedDialog(true);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-brand-dark text-gray-300 font-sans">
@@ -1017,7 +1029,7 @@ const UploadPage = () => {
           )}
 
           {/* Upgrade Prompt Dialog */}
-          <Dialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
+          <Dialog open={showUpgradeDialog} onOpenChange={handleDialogOpenChange}>
             <DialogContent className="bg-white border-none shadow-2xl max-w-4xl rounded-2xl p-0 overflow-hidden">
               <DialogHeader className="p-6 pb-0 z-10 relative">
                 <DialogTitle className="text-2xl font-semibold text-gray-900 flex items-center">
@@ -1033,17 +1045,35 @@ const UploadPage = () => {
                 <PricingSection 
                   theme="light" 
                   checkoutFunction={initiateCheckout} 
-                  excludePlanId={currentUserPlanId || undefined} // <<< Pass user's current plan ID to exclude
+                  excludePlanId={currentUserPlanId || undefined}
                   title="" 
-                  subtitle="" 
+                  subtitle=""
+                  planFeatures={{
+                    // Plan for $35 (Premium)
+                    'SC9FWWIFZ7QDCM': [
+                      "500 Generations/Month",
+                      "2 GB Storage",
+                      "Authentication + Latest Improvements",
+                      "Community Support"
+                    ],
+                    // Plan for $15 (Basic)
+                    'SC9FJQGAEZLGH5': [
+                      "100 Generations/Month",
+                      "1 GB Storage",
+                      "Basic Authentication"
+                    ]
+                  }}
                 />
-          </div>
+              </div>
               
               <DialogFooter className="bg-gray-50 p-4 flex justify-center border-t border-gray-100">
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setShowUpgradeDialog(false)}
+                  onClick={() => {
+                    setShowUpgradeDialog(false);
+                    setHasManuallyClosedDialog(true);
+                  }}
                   className="text-gray-500 hover:text-gray-700 hover:bg-gray-100"
                 >
                   Maybe Later
