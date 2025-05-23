@@ -720,8 +720,8 @@ const UploadPage = () => {
           {/* Logo */}
           <Link to="/" className="flex items-center">
             <img
-              src="/headylogo.png"
-              alt="Heady Logo"
+              src="/straininsightslogo.png"
+              alt="StrainInsights Logo"
               className="h-12 w-auto"
             />
           </Link>
