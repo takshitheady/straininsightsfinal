@@ -1047,7 +1047,7 @@ const UploadPage = () => {
                   checkoutFunction={initiateCheckout} 
                   excludePlanId={currentUserPlanId || undefined}
                   title="" 
-                  subtitle=""
+                  subtitle="" 
                   planFeatures={{
                     // Plan for $35 (Premium)
                     'SC9FWWIFZ7QDCM': [
@@ -1064,7 +1064,7 @@ const UploadPage = () => {
                     ]
                   }}
                 />
-              </div>
+          </div>
               
               <DialogFooter className="bg-gray-50 p-4 flex justify-center border-t border-gray-100">
                 <Button

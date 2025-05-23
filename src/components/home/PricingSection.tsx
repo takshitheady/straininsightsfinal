@@ -25,7 +25,13 @@ interface Plan {
   currency: string;
   interval: string;
   interval_count: number;
-  product: string;
+  product: {
+    id: string;
+    name: string;
+    // Add other product fields you might need, e.g., metadata
+    metadata?: Record<string, any>; 
+    [key: string]: any; // Allow other product properties
+  } | string; // product can be an object or still a string ID as a fallback
   created: number;
   livemode: boolean;
   nickname?: string;
@@ -43,21 +49,24 @@ interface PricingSectionProps {
   excludePlanId?: string; // <<< Add new optional prop
 }
 
-// Custom plan names mapping - SC9FWWIFZ7QDCM, SC9FJQGAEZLGH5
+// Custom plan names mapping - can be a reliable fallback
 const planNames = {
-  'SC9FWWIFZ7QDCM': 'Premium Plan',
-  'SC9FJQGAEZLGH5': 'Basic Plan'
+  'SC9FWWIFZ7QDCM': 'Premium Plan', // Example: Price ID for $99 plan
+  'SC9FJQGAEZLGH5': 'Basic Plan',    // Example: Price ID for $39 plan
+  // Add your actual current Price IDs here if different and map them to desired names
+  'price_1RRwv8DCXlQWdJgdtLj4Xjlr': 'Basic Plan', // Assuming this is $39
+  'price_1RRwuODCXlQWdJgd5P6bAID9': 'Premium Plan' // Assuming this is $99
 };
 
 // Updated default features with the new requested items
 const defaultPlanFeatures = {
   basic: [
-    "100 Generations/Month",
+    "30 Generations/Month",
     "1 GB Storage",
     "Basic Authentication"
   ],
   pro: [
-    "500 Generations/Month",
+    "100 Generations/Month",
     "2 GB Storage",
     "Authentication + Latest Improvements",
     "Community Support"
@@ -147,31 +156,30 @@ export default function PricingSection({
   };
 
   // Determine features to display
-  const getFeaturesForPlan = (planId: string, planProduct: string) => {
-    // Prioritize override features if provided
+  const getFeaturesForPlan = (planId: string, product: any) => {
     if (overridePlanFeatures && overridePlanFeatures[planId]) {
       return overridePlanFeatures[planId];
     }
     
-    // Use price-based determination to ensure consistency
     const plan = allPlans.find(p => p.id === planId);
-    if (plan?.amount === 1500) {
-      return defaultPlanFeatures.basic; // $15 plan (Basic)
-    } else if (plan?.amount === 3500) {
-      return defaultPlanFeatures.pro; // $35 plan (Premium)
+
+    if (plan?.amount === 3900) { // $39 plan
+      return defaultPlanFeatures.basic;
+    } else if (plan?.amount === 9900) { // $99 plan
+      return defaultPlanFeatures.pro;
     }
     
-    // For our specific plan IDs as fallback
-    if (planId === 'SC9FJQGAEZLGH5') {
-      return defaultPlanFeatures.basic; // Basic Plan
-    } else if (planId === 'SC9FWWIFZ7QDCM') {
-      return defaultPlanFeatures.pro; // Premium Plan
+    let productName = '';
+    if (product && typeof product === 'object' && product.name) {
+      productName = product.name.toLowerCase();
+    } else if (typeof product === 'string') {
+      // Fallback if product is somehow still a string ID (though it shouldn't be with expand)
+      productName = product.toLowerCase(); 
     }
-    
-    // Fallback to default features based on product name
-    if (planProduct.toLowerCase().includes("enterprise")) return defaultPlanFeatures.enterprise;
-    if (planProduct.toLowerCase().includes("pro")) return defaultPlanFeatures.pro;
-    return defaultPlanFeatures.basic; // Default to basic
+
+    if (productName.includes("enterprise")) return defaultPlanFeatures.enterprise;
+    if (productName.includes("pro") || productName.includes("premium")) return defaultPlanFeatures.pro;
+    return defaultPlanFeatures.basic;
   };
 
   // --- Refined Theme Styles --- 
@@ -190,7 +198,13 @@ export default function PricingSection({
   // Modernized Button Styles for Light Theme
   const buttonClasses = (planId: string) => {
     const plan = allPlans.find(p => p.id === planId);
-    const isPro = plan?.product.toLowerCase().includes('pro'); // Check if it's the Pro plan (adjust if needed)
+    let productName = '';
+    if (plan?.product && typeof plan.product === 'object' && plan.product.name) {
+      productName = plan.product.name.toLowerCase();
+    } else if (typeof plan?.product === 'string') {
+      productName = plan.product.toLowerCase();
+    }
+    const isPro = productName.includes('pro') || productName.includes('premium');
 
     if (theme === 'light') {
       // Primary button (Pro plan): Brand green
@@ -259,8 +273,15 @@ export default function PricingSection({
               className={`flex flex-col h-full transition-all ${cardClasses}`}>
               <CardHeader className="pb-4 pt-6 px-6">
                 <CardDescription className={`text-sm font-medium ${subtitleClasses}`}>
-                  {/* Use price-based determination for plan names */}
-                  {plan.amount === 1500 ? "Basic Plan" : plan.amount === 3500 ? "Premium Plan" : planNames[plan.id] || plan.nickname || plan.product?.split('_').pop()?.replace(' Plan', '').toUpperCase() || 'Plan'}
+                  {
+                    (plan.product && typeof plan.product === 'object' && plan.product.name) 
+                      ? plan.product.name  // Primary: Stripe Product Name
+                      : planNames[plan.id] // Secondary: Local planNames map by Price ID
+                        ? planNames[plan.id]
+                        : plan.nickname // Tertiary: Stripe Nickname
+                          ? plan.nickname 
+                          : plan.id // Last resort: Price ID
+                  }
                 </CardDescription>
                 <div className="mt-2">
                   <span className={`text-4xl font-bold ${titleClasses}`}>

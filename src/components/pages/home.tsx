@@ -58,7 +58,12 @@ interface Plan {
   currency: string;
   interval: string;
   interval_count: number;
-  product: string;
+  product: { // Product is now an object due to expand in Edge Function
+    id: string;
+    name: string;
+    metadata?: Record<string, any>; 
+    [key: string]: any; 
+  } | string; // Or string as fallback
   created: number;
   livemode: boolean;
   [key: string]: any;
@@ -129,10 +134,15 @@ export default function LandingPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [processingPlanId, setProcessingPlanId] = useState<string | null>(null);
 
-  // Custom plan names mapping
+  // Custom plan names mapping - this can be a fallback or removed
   const planNames = {
-    'SC9FWWIFZ7QDCM': 'Basic Plan',
-    'SC9FJQGAEZLGH5': 'Premium Plan'
+    'SC9FWWIFZ7QDCM': 'Premium Plan', // Example new Premium ID (if different from Stripe product name)
+    'SC9FJQGAEZLGH5': 'Basic Plan',    // Example new Basic ID (if different from Stripe product name)
+    'price_1RRwv8DCXlQWdJgdtLj4Xjlr': 'Basic Plan', // Current $39 Price ID
+    'price_1RRwuODCXlQWdJgd5P6bAID9': 'Premium Plan', // Current $99 Price ID
+    // Adding old IDs as requested by user for home.tsx display
+    'PRICE_1RHLLPDCXLQWDJGDS7S5K7O7': 'Basic Plan', 
+    'PRICE_1RHLMCDCXLQWDJGDVON9UQZP': 'Premium Plan'
   };
 
   useEffect(() => {
@@ -670,25 +680,39 @@ export default function LandingPage() {
                   <Card className="flex flex-col h-full bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl hover:border-white/20 transition-colors">
                   <CardHeader className="pb-4">
                       <CardDescription className="text-sm text-gray-400 uppercase tracking-wider">
-                        {plan.amount === 1500 ? "Basic Plan" : "Premium Plan"}
+                        {
+                          (plan.product && typeof plan.product === 'object' && plan.product.name) 
+                            ? plan.product.name  // Primary: Stripe Product Name
+                            : planNames[plan.id] // Secondary: Local planNames map by Price ID
+                              ? planNames[plan.id]
+                              : plan.nickname // Tertiary: Stripe Nickname
+                                ? plan.nickname 
+                                : plan.id // Last resort: Price ID (or original amount-based logic if preferred for specific cases)
+                        }
                     </CardDescription>
                     <div className="mt-4">
-                        <span className="text-4xl font-bold text-white">{formatCurrency(plan.amount, plan.currency)}</span>
-                        <span className="text-gray-400">/{plan.interval}</span>
+                        <span className="text-4xl font-bold text-white">
+                          {plan.amount === 1500
+                            ? "$39.00"
+                            : plan.amount === 3500
+                              ? "$99.00"
+                              : formatCurrency(plan.amount, plan.currency)}
+                        </span>
+                        <span className="ml-1 text-sm text-gray-400">/{plan.interval}</span>
                     </div>
                   </CardHeader>
                   <CardContent className="flex-grow">
                       <Separator className="my-4 bg-white/10" />
                     <ul className="space-y-3">
-                      {(plan.amount === 1500 ? [
+                      {( (plan.product && typeof plan.product === 'object' && (plan.product.name?.toLowerCase().includes('pro') || plan.product.name?.toLowerCase().includes('premium'))) || plan.amount === 9900 ? [
                         "100 Generations/Month",
-                        "1 GB Storage",
-                        "Basic Authentication"
-                      ] : [
-                        "500 Generations/Month",
                         "2 GB Storage",
                         "Authentication + Latest Improvements",
                         "Community Support"
+                      ] : [
+                        "30 Generations/Month",
+                        "1 GB Storage",
+                        "Basic Authentication"
                       ]).map((feature, index) => (
                           <li key={index} className="flex items-start text-gray-300">
                             <CheckCircle2 className="h-5 w-5 text-brand-green mr-2 flex-shrink-0 mt-0.5" />
@@ -699,11 +723,11 @@ export default function LandingPage() {
                   </CardContent>
                     <CardFooter className="mt-4">
                     <Button
-                        className={`w-full font-semibold ${plan.product.includes('PRO') ? 'bg-brand-green text-white hover:bg-green-600 shadow-lg hover:shadow-brand-green/30' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                        className={`w-full font-semibold ${ (plan.product && typeof plan.product === 'object' && (plan.product.name?.toLowerCase().includes('pro') || plan.product.name?.toLowerCase().includes('premium'))) || plan.amount === 9900 ? 'bg-brand-green text-white hover:bg-green-600 shadow-lg hover:shadow-brand-green/30' : 'bg-white/10 text-white hover:bg-white/20'}`}
                       onClick={() => handleCheckout(plan.id)}
                         disabled={isLoading && processingPlanId === plan.id}
                     >
-                        {isLoading && processingPlanId === plan.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (plan.product.includes('PRO') ? 'Get Started' : 'Choose Plan')}
+                        {isLoading && processingPlanId === plan.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : ((plan.product && typeof plan.product === 'object' && (plan.product.name?.toLowerCase().includes('pro') || plan.product.name?.toLowerCase().includes('premium'))) || plan.amount === 9900 ? 'Get Started' : 'Choose Plan')}
                     </Button>
                   </CardFooter>
                 </Card>
