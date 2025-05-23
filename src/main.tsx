@@ -2,8 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
-// import { AuthProvider } from "./supabase/auth.tsx"; // Commented out due to path issue
+import { AuthProvider } from "../supabase/auth.tsx";
 import { BrowserRouter } from "react-router-dom";
+import { Toaster } from "@/components/ui/toaster";
 
 import { TempoDevtools } from "tempo-devtools";
 TempoDevtools.init();
