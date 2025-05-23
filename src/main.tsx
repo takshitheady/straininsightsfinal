@@ -14,9 +14,9 @@ const basename = import.meta.env.BASE_URL || "/";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter basename={basename}>
-      {/* <AuthProvider> */}
+      <AuthProvider>
         <App />
-      {/* </AuthProvider> */}
+      </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>,
 );
