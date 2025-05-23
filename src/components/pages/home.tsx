@@ -47,7 +47,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 // Define the Plan type
 interface Plan {
@@ -91,9 +91,7 @@ interface HeroStat {
   title: string;
   value: string;
   comparison: string;
-  icon: JSX.Element;
-  iconBgColor: string;
-  iconTextColor: string;
+  imageSrc: string; // New field for image source
 }
 
 // Animation Variants for Framer Motion
@@ -133,6 +131,7 @@ export default function LandingPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [processingPlanId, setProcessingPlanId] = useState<string | null>(null);
+  const [currentHeroSlide, setCurrentHeroSlide] = useState(0); // State for carousel
 
   // Custom plan names mapping - this can be a fallback or removed
   const planNames = {
@@ -298,27 +297,31 @@ export default function LandingPage() {
       title: "Accuracy Improvement",
       value: "99.5%",
       comparison: "↑ vs Manual Entry",
-      icon: <BarChart className="h-5 w-5" />,
-      iconBgColor: "bg-green-500/10",
-      iconTextColor: "text-green-400",
+      imageSrc: "/accuracyimage.png",
     },
     {
       title: "Time Saved per COA",
       value: "5 mins",
       comparison: "↑ Average User",
-      icon: <Clock className="h-5 w-5" />,
-      iconBgColor: "bg-blue-500/10",
-      iconTextColor: "text-blue-400",
+      imageSrc: "/timeimage.png",
     },
     {
       title: "SEO Engagement Boost",
       value: "75%",
       comparison: "↑ Click-Through Rate",
-      icon: <DollarSign className="h-5 w-5" />,
-      iconBgColor: "bg-yellow-500/10",
-      iconTextColor: "text-yellow-400",
+      imageSrc: "/seoimage.png",
     },
   ];
+
+  // useEffect for auto-sliding carousel
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCurrentHeroSlide((prevSlide) =>
+        prevSlide === heroStats.length - 1 ? 0 : prevSlide + 1
+      );
+    }, 5000); // Change slide every 5 seconds
+    return () => clearTimeout(timer);
+  }, [currentHeroSlide, heroStats.length]);
 
   // Sample testimonials data
   const testimonials: Testimonial[] = [
@@ -403,20 +406,20 @@ export default function LandingPage() {
         initial={{ y: -100 }}
         animate={{ y: 0 }}
         transition={{ type: "spring", stiffness: 50, damping: 15 }}
-        className="sticky top-0 z-50 w-full h-20 border-b border-white/10 bg-brand-dark/90 backdrop-blur-md"
+        className="sticky top-0 z-50 w-full h-32 border-b border-white/10 bg-brand-dark/90 backdrop-blur-md"
       >
         <div className="container mx-auto px-4 flex h-full items-center justify-between">
           {/* Logo */}
           <Link to="/" className="flex items-center">
             <img
-              src="/headylogo.png"
-              alt="Heady Logo"
-              className="h-12 w-auto"
+              src="/straininsightslogo.png"
+              alt="StrainInsights Logo"
+              className="h-24 w-auto"
             />
           </Link>
 
           {/* Navigation (Optional - adapt as needed) */}
-          <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
+          <nav className="hidden md:flex items-center space-x-6 text-lg font-medium">
             <Link to="/upload" className="text-gray-300 hover:text-white transition-colors">Upload</Link>
             <a href="#features" className="text-gray-300 hover:text-white transition-colors">Features</a>
             <a href="#pricing" className="text-gray-300 hover:text-white transition-colors">Pricing</a>
@@ -466,7 +469,7 @@ export default function LandingPage() {
                 <Link to="/login">
                   <Button
                   variant="outline"
-                  className="text-white bg-white/10 border-white/20 hover:bg-white/20 transition-colors text-sm font-semibold"
+                  className="bg-brand-green text-white hover:bg-green-600 border-brand-green font-semibold text-base px-6 py-3 transition-colors shadow-lg hover:shadow-brand-green/30"
                   >
                     Sign In
                   </Button>
@@ -508,14 +511,14 @@ export default function LandingPage() {
                   PDFs and let AI handle the data extraction and analysis, streamlining
                   your compliance and quality control.
                 </motion.p>
-                <motion.div variants={fadeIn}>
+                <motion.div variants={fadeIn} className="flex justify-center lg:justify-start">
                   <Link to="/upload">
                     <Button
                       size="lg"
-                      className="bg-brand-green text-white hover:bg-green-600 font-semibold text-base px-8 py-3 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
+                      className="bg-brand-green text-white hover:bg-green-600 font-semibold text-2xl px-12 py-6 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
                     >
-                      Go to Upload
-                      <ArrowRight className="ml-2 h-5 w-5" />
+                      Upload your PDF
+                      <ArrowRight className="ml-3 h-7 w-7" />
                     </Button>
                   </Link>
                 </motion.div>
@@ -534,31 +537,46 @@ export default function LandingPage() {
                 </motion.div>
               </motion.div>
 
-              {/* Right Metrics Cards */}
+              {/* Right Metrics Cards - Now a Carousel */}
               <motion.div
-                variants={staggerContainer}
-                initial="hidden"
-                animate="visible"
-                className="grid grid-cols-1 gap-6"
+                className="relative w-full max-w-sm md:max-w-md mx-auto h-[400px] md:h-[480px] overflow-hidden" // Adjusted height
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5 }}
               >
-                {heroStats.map((stat) => (
-                  <motion.div key={stat.title} variants={slideInRight}>
-                    <Card className="bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl overflow-hidden">
-                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-gray-300">
-                          {stat.title}
-                        </CardTitle>
-                        <div className={`p-1.5 rounded-md ${stat.iconBgColor} ${stat.iconTextColor}`}>
-                          {stat.icon}
-                  </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className={`text-2xl font-bold ${stat.iconTextColor}`}>{stat.value}</div>
-                        <p className="text-xs text-gray-400 mt-1">{stat.comparison}</p>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                ))}
+                <AnimatePresence initial={false} custom={currentHeroSlide}>
+                  {heroStats.map(
+                    (stat, index) =>
+                      index === currentHeroSlide && (
+                        <motion.div
+                          key={stat.title}
+                          custom={currentHeroSlide}
+                          initial={{ x: "100%", opacity: 0 }}
+                          animate={{ x: "0%", opacity: 1 }}
+                          exit={{ x: "-100%", opacity: 0 }}
+                          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                          className="absolute w-full h-full"
+                        >
+                          <Card className="h-full flex flex-col items-center justify-center p-6 bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl text-center">
+                            <img
+                              src={stat.imageSrc}
+                              alt={stat.title}
+                              className="w-auto h-48 md:h-56 object-contain mb-3" // Increased image height, w-auto, reduced mb
+                            />
+                            <CardTitle className="text-xl md:text-2xl font-semibold text-white mb-1">
+                              {stat.title}
+                            </CardTitle>
+                            <div className="text-3xl md:text-4xl font-bold text-brand-green mb-1">
+                              {stat.value}
+                            </div>
+                            <p className="text-sm md:text-base text-gray-400">
+                              {stat.comparison}
+                            </p>
+                          </Card>
+                        </motion.div>
+                      )
+                  )}
+                </AnimatePresence>
               </motion.div>
             </div>
           </div>
@@ -646,10 +664,10 @@ export default function LandingPage() {
               </div>
             )}
 
-            <motion.div variants={staggerContainer} initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8 max-w-4xl mx-auto">
+            <motion.div variants={staggerContainer} initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
               {isLoading ? (
                 // Prettier loading state with skeleton cards
-                Array.from({ length: 2 }).map((_, index) => (
+                Array.from({ length: 3 }).map((_, index) => (
                   <motion.div key={`skeleton-${index}`} variants={fadeIn}>
                     <Card className="flex flex-col h-full bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl overflow-hidden animate-pulse">
                       <CardHeader className="pb-4">
@@ -723,7 +741,7 @@ export default function LandingPage() {
                   </CardContent>
                     <CardFooter className="mt-4">
                     <Button
-                        className={`w-full font-semibold ${ (plan.product && typeof plan.product === 'object' && (plan.product.name?.toLowerCase().includes('pro') || plan.product.name?.toLowerCase().includes('premium'))) || plan.amount === 9900 ? 'bg-brand-green text-white hover:bg-green-600 shadow-lg hover:shadow-brand-green/30' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                        className={`w-full font-semibold ${ (plan.product && typeof plan.product === 'object' && (plan.product.name?.toLowerCase().includes('pro') || plan.product.name?.toLowerCase().includes('premium'))) || plan.amount === 9900 || plan.amount === 3900 ? 'bg-brand-green text-white hover:bg-green-600 shadow-lg hover:shadow-brand-green/30' : 'bg-white/10 text-white hover:bg-white/20'}`}
                       onClick={() => handleCheckout(plan.id)}
                         disabled={isLoading && processingPlanId === plan.id}
                     >
@@ -734,6 +752,48 @@ export default function LandingPage() {
                 </motion.div>
               )) : (
                 <p className="text-center text-gray-400 md:col-span-2 lg:col-span-3">No pricing plans available at this time.</p>
+              )}
+
+              {/* Static Enterprise Plan Card - only show if not loading and plans are fetched (or even if no plans are fetched) */} 
+              {!isLoading && (
+                <motion.div variants={fadeIn}>
+                  <Card className="flex flex-col h-full bg-white/5 backdrop-blur-sm border border-white/10 shadow-xl hover:border-white/20 transition-colors">
+                    <CardHeader className="pb-4">
+                        <CardDescription className="text-sm text-gray-400 uppercase tracking-wider">
+                          Enterprise Plan
+                      </CardDescription>
+                      <div className="mt-4">
+                          <span className="text-4xl font-bold text-white">
+                            Custom
+                          </span>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="flex-grow">
+                        <Separator className="my-4 bg-white/10" />
+                      <ul className="space-y-3">
+                        {[
+                          "Bulk Processing of Lab Results: via PDF or via CSV",
+                          "Integration with Lab Results Database",
+                          "Custom Pricing",
+                          "Direct Team Support"
+                        ].map((feature, index) => (
+                            <li key={index} className="flex items-start text-gray-300">
+                              <CheckCircle2 className="h-5 w-5 text-brand-green mr-2 flex-shrink-0 mt-0.5" />
+                            <span>{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                      <CardFooter className="mt-4">
+                      <Button
+                          className={`w-full font-semibold bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-blue-600/30`}
+                        onClick={() => window.location.href = 'https://calendly.com/naughton-by-nature/30min'}
+                      >
+                          Contact Us
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                </motion.div>
               )}
             </motion.div>
           </div>
@@ -799,16 +859,13 @@ export default function LandingPage() {
             {/* Column 1: Logo & Socials */}
             <div>
               <Link to="/" className="flex items-center mb-4">
-                <img src="/headylogo.png" alt="Heady Logo" className="h-9 w-auto opacity-90" />
+                <img src="/straininsightslogo.png" alt="StrainInsights Logo" className="h-9 w-auto opacity-90" />
               </Link>
               <p className="text-sm mb-4 pr-4">AI-Powered COA analysis for the cannabis industry.</p>
-              <div className="flex space-x-4">
-                <a href="#" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-white transition-colors"><Github className="h-5 w-5" /></a>
-                <a href="#" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-white transition-colors"><Twitter className="h-5 w-5" /></a>
-                <a href="#" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-white transition-colors"><Instagram className="h-5 w-5" /></a>
-              </div>
             </div>
-            {/* Column 2, 3, 4: Links (Example) */}
+            {/* Spacer to push Product and Company sections to the right on md+ screens */}
+            <div className="hidden md:block"></div>
+            {/* Product and Company Links */}
             <div>
               <h3 className="font-semibold text-sm text-white uppercase tracking-wider mb-4">Product</h3>
               <ul className="space-y-3 text-sm">
@@ -818,18 +875,10 @@ export default function LandingPage() {
               </ul>
             </div>
             <div>
-              <h3 className="font-semibold text-sm text-white uppercase tracking-wider mb-4">Resources</h3>
-              <ul className="space-y-3 text-sm">
-                <li><Link to="#" className="hover:text-white transition-colors">Documentation</Link></li>
-                <li><Link to="#" className="hover:text-white transition-colors">Blog</Link></li>
-                {/* Add more links */}
-              </ul>
-            </div>
-            <div>
               <h3 className="font-semibold text-sm text-white uppercase tracking-wider mb-4">Company</h3>
               <ul className="space-y-3 text-sm">
-                <li><Link to="#" className="hover:text-white transition-colors">About Us</Link></li>
-                <li><Link to="#" className="hover:text-white transition-colors">Contact</Link></li>
+                <li><a href="https://useheady.com/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">About Us</a></li>
+                <li><a href="https://useheady.com/contact" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Contact</a></li>
                 {/* Add more links */}
               </ul>
             </div>
@@ -837,7 +886,9 @@ export default function LandingPage() {
           {/* Bottom Footer */}
           <Separator className="my-8 bg-white/10" />
           <div className="flex flex-col md:flex-row justify-between items-center text-sm">
-            <p>&copy; {new Date().getFullYear()} Heady. All rights reserved.</p>
+            <p className="text-center md:text-left">
+              © 2025 The Heady Collective, LLC · All Rights Reserved · HEADY™ and HEADY COLLECTIVE™ are trademarks of The Heady Collective, LLC.
+            </p>
             <div className="flex space-x-6 mt-4 md:mt-0">
               <Link to="#" className="hover:text-white transition-colors">Privacy Policy</Link>
               <Link to="#" className="hover:text-white transition-colors">Terms of Service</Link>
