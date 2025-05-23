@@ -327,30 +327,30 @@ export default function LandingPage() {
   const testimonials: Testimonial[] = [
     {
       id: 1,
-      name: "Sarah Johnson",
-      role: "CTO",
-      company: "TechFlow",
+      name: "Alex Chen",
+      role: "Marketing Lead",
+      company: "GreenLeaf Marketing",
       content:
-        "Tempo Starter Kit has dramatically reduced our development time. The integration with Supabase is seamless and the UI components are beautiful.",
-      avatar: "sarah",
+        "StrainInsights has been a game-changer for our content team. We used to spend hours manually pulling data from COAs for website updates. Now, we get accurate, ready-to-post descriptions in minutes!",
+      avatar: "alex", // Keep avatar or update if new ones are provided
     },
     {
       id: 2,
-      name: "Michael Chen",
-      role: "Lead Developer",
-      company: "InnovateCorp",
+      name: "Maria Rodriguez",
+      role: "Dispensary Owner",
+      company: "BuddingSuccess Retail",
       content:
-        "I've tried many starter kits, but Tempo stands out with its performance and developer experience. Highly recommended for any modern web project.",
-      avatar: "michael",
+        "Keeping our online product listings fresh and informative was a constant struggle with PDF COAs. StrainInsights transformed that. The ability to generate website-ready content directly is a huge time saver and boosts our SEO.",
+      avatar: "maria",
     },
     {
       id: 3,
-      name: "Aisha Patel",
-      role: "Product Manager",
-      company: "DigitalWave",
+      name: "Samira Khan",
+      role: "E-commerce Manager",
+      company: "CannaClicks Online",
       content:
-        "Our team was able to launch our MVP in record time thanks to Tempo. The authentication and database features saved us weeks of development.",
-      avatar: "aisha",
+        "The biggest hurdle for our product pages was getting consistent, detailed info from PDFs. StrainInsights automates this beautifully. Our descriptions are now richer, and we can update them so much faster.",
+      avatar: "samira",
     },
   ];
 
@@ -419,7 +419,7 @@ export default function LandingPage() {
           </Link>
 
           {/* Navigation (Optional - adapt as needed) */}
-          <nav className="hidden md:flex items-center space-x-6 text-lg font-medium">
+          <nav className="hidden md:flex items-center space-x-16 text-lg font-medium">
             <Link to="/upload" className="text-gray-300 hover:text-white transition-colors">Upload</Link>
             <a href="#features" className="text-gray-300 hover:text-white transition-colors">Features</a>
             <a href="#pricing" className="text-gray-300 hover:text-white transition-colors">Pricing</a>
@@ -501,15 +501,13 @@ export default function LandingPage() {
                   variants={fadeIn}
                   className="font-serif font-medium text-5xl md:text-6xl lg:text-7xl tracking-tight"
                 >
-                  The AI-Powered <span className="text-brand-green">StrainInsights</span> Tool
+                  Get AI-Powered Generated Content from <span className="text-brand-green">Lab Results</span>
                 </motion.h1>
                 <motion.p
                   variants={fadeIn}
                   className="text-lg md:text-xl text-gray-300 leading-relaxed"
                 >
-                  Instantly unlock valuable insights from your lab results. Upload COA
-                  PDFs and let AI handle the data extraction and analysis, streamlining
-                  your compliance and quality control.
+                  Bring your lab result PDFs and get SEO-ready content generated instantly. Our AI is expertly trained on extracting COA data to streamline your workflow and boost your online presence.
                 </motion.p>
                 <motion.div variants={fadeIn} className="flex justify-center lg:justify-start">
                   <Link to="/upload">
@@ -843,8 +841,8 @@ export default function LandingPage() {
               <h2 className="font-serif text-3xl md:text-4xl lg:text-5xl font-medium mb-6 text-white">Ready to Streamline Your Lab Results?</h2>
               <p className="text-lg md:text-xl mb-10 text-gray-300 max-w-2xl mx-auto">Start leveraging AI for faster, more accurate COA analysis today.</p>
               <Link to="/upload">
-                <Button size="lg" className="bg-brand-green text-white hover:bg-green-600 font-semibold text-base px-10 py-3 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30">
-                  Get Started (Upload)
+                <Button size="lg" className="bg-brand-green text-white hover:bg-green-600 font-semibold text-2xl px-16 py-5 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30">
+                  Upload
                     </Button>
                   </Link>
             </motion.div>
