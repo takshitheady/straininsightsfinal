@@ -19,7 +19,7 @@ This document illustrates key data flows and interactions between the frontend, 
 2.  **Frontend**: Calls `supabase.auth.signInWithPassword({ email, password })`.
 3.  **Supabase Auth**: Verifies credentials, creates a session, and returns session data (including JWT).
 4.  **Frontend (`AuthProvider` in `src/supabase/auth.tsx`)**: Stores session, updates user state.
-5.  **Frontend**: User can now access protected routes. Subsequent API calls to Supabase (database, storage, functions) from the client will include the JWT for authentication and RLS enforcement.
+5.  **Frontend**: User can now access protected routes. If an unauthenticated user clicks a protected call-to-action (e.g., "Upload", "Choose Plan"), they are typically redirected to the login page first, often with a redirect parameter to guide them back to their original intent after successful login. Subsequent API calls to Supabase (database, storage, functions) from the client will include the JWT for authentication and RLS enforcement.
 
 ## Flow 3: Viewing Pricing Plans (Homepage & Upgrade Dialog)
 
@@ -29,19 +29,21 @@ This document illustrates key data flows and interactions between the frontend, 
     *   **Cache Miss (or Expired)**: Proceeds to fetch from API.
 3.  **Frontend**: Calls `supabase.functions.invoke('get-plans')` (or the correctly named alias like `supabase-functions-get-plans`).
 4.  **Supabase Edge Function (`get-plans`)**: Receives the request.
-    *   Uses `STRIPE_SECRET_KEY` to initialize Stripe client.
+    *   Uses **live** `STRIPE_SECRET_KEY` (in production) to initialize Stripe client.
     *   Calls `stripe.prices.list({ active: true, expand: ['data.product'] })` to fetch active prices and associated product details.
-    *   Returns a JSON array of Stripe Price objects.
+    *   Returns a JSON array of Stripe Price objects (these will have **live** Price IDs in production).
 5.  **Frontend**: Receives the plan data.
     *   Stores the fetched data in `localStorage` with a new timestamp.
     *   Updates component state with plan data (`allPlans`).
     *   Renders the pricing cards:
-        *   Plan names are determined client-side (e.g., based on `plan.amount` or `plan.id` mapped to `planNames` object).
+        *   Plan names are determined client-side by prioritizing `plan.product.name` (from Stripe), then a local `planNames` map (keyed by **live** Price IDs), then `plan.nickname`, and finally the Price ID itself if no other name is found.
         *   Features are determined client-side (e.g., `getPlanFeatures(plan.id)` in `home.tsx` or based on `plan.amount` in `PricingSection.tsx`).
 
 ## Flow 4: File Upload, Processing, and Result Display (`UploadPage.tsx`)
 
-1.  **Frontend**: User selects/drops a PDF file.
+1.  **Frontend**: User clicks an "Upload" call-to-action button.
+    *   **Auth Check**: If the user is not authenticated, they are redirected to the `/login` page (often with a redirect parameter like `?redirect=/upload`).
+    *   If authenticated, the user selects/drops a PDF file.
     *   Client-side validation (type, size).
     *   User usage (`generations_used`, `generation_limit`) is fetched from the Supabase `users` table to check if the user can upload.
     *   If limit reached, upload is disabled, and an upgrade dialog is shown (see Flow 3 for dialog plan display).
@@ -72,14 +74,15 @@ The `id` of this new record (`labResultId`) is retrieved.
 ## Flow 5: User Subscribes to a Plan (Stripe Checkout)
 
 1.  **Frontend (`home.tsx` or `PricingSection.tsx` in `UploadPage.tsx` dialog)**: User clicks "Choose Plan" or "Upgrade".
-2.  **Frontend (`handleCheckout` / `initiateCheckout`)**: Calls `supabase.functions.invoke('create-checkout', { body: { price_id, user_id, return_url }, headers: { 'X-Customer-Email': user.email } })`.
-    *   `price_id`: The Stripe Price ID of the selected plan.
+    *   **Auth Check**: If the user is not authenticated, they are redirected to the `/login` page (often with a redirect parameter like `?redirect=pricing` or the current page).
+2.  **Frontend (`handleCheckout` / `initiateCheckout`)**: If authenticated, calls `supabase.functions.invoke('create-checkout', { body: { price_id, user_id, return_url }, headers: { 'X-Customer-Email': user.email } })`.
+    *   `price_id`: The **live** Stripe Price ID of the selected plan.
     *   `user_id`: The authenticated user's ID.
-    *   `return_url`: URL to redirect to after checkout (e.g., `/profile`).
+    *   `return_url`: URL to redirect to after checkout (e.g., `/profile`). Should be the production frontend URL when live.
 3.  **Supabase Edge Function (`create-checkout`)**: Receives the request.
-    *   Initializes Stripe client (`STRIPE_SECRET_KEY`).
+    *   Initializes Stripe client (using **live** `STRIPE_SECRET_KEY` in production).
     *   Fetches the user's `stripe_customer_id` from the Supabase `users` table. If none, creates a new Stripe Customer and saves the ID to the `users` table.
-    *   Creates a Stripe Checkout Session with `customer`, `price_id`, `mode: 'subscription'`, `success_url`, `cancel_url`, and `metadata` (including `user_id`).
+    *   Creates a Stripe Checkout Session with `customer`, `price_id`, `mode: 'subscription'`, `success_url` (production URL), `cancel_url` (production URL), `allow_promotion_codes: true` (to enable coupons), and `metadata` (including `user_id`).
     *   Returns the `session.url` to the frontend.
 4.  **Frontend**: Receives the Stripe Checkout Session URL.
 5.  **Frontend**: Redirects the browser to `session.url`.
@@ -89,15 +92,15 @@ The `id` of this new record (`labResultId`) is retrieved.
 
 ## Flow 6: Stripe Webhook Processing (`payments-webhook`)
 
-1.  **Stripe**: Sends an event (e.g., `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`) to the configured webhook URL pointing to the `payments-webhook` Edge Function.
+1.  **Stripe**: Sends an event (e.g., `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`) to the configured **live** webhook URL pointing to the `payments-webhook` Edge Function.
 2.  **Supabase Edge Function (`payments-webhook`)**: Receives the HTTP POST request from Stripe.
-    *   Verifies the Stripe signature using `Stripe-Signature` header and `STRIPE_WEBHOOK_SECRET`.
+    *   Verifies the Stripe signature using `Stripe-Signature` header and the **live** `STRIPE_WEBHOOK_SECRET`.
     *   Parses the event object.
     *   **Handles `checkout.session.completed`**:
         *   Extracts `stripe_customer_id`, `subscription_id`, and `user_id` (from metadata).
-        *   Updates the Supabase `users` table for the `user_id`: sets `stripe_customer_id`, `current_plan_id` (from the subscription's price ID), `subscription_status` to `'active'`, updates `generation_limit` based on the new plan, and resets `generations_used`.
+        *   Updates the Supabase `users` table for the `user_id`: sets `stripe_customer_id`, `current_plan_id` (this will be a **live** Stripe Price ID), `subscription_status` to `'active'`, updates `generation_limit` based on the new plan, and resets `generations_used`.
     *   **Handles `customer.subscription.updated`**:
-        *   Extracts Stripe `customer_id`, new `plan.id` (Price ID), and `status`.
+        *   Extracts Stripe `customer_id`, new `plan.id` (**live** Price ID), and `status`.
         *   Finds user by `stripe_customer_id` in `users` table.
         *   Updates `current_plan_id`, `subscription_status`, `generation_limit`.
         *   Resets `generations_used` if a new billing period starts.

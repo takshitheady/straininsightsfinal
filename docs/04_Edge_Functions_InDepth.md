@@ -26,6 +26,7 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
         apiVersion: '2023-10-16', // Or your target API version
         httpClient: Stripe.createFetchHttpClient(),
     });
+    // Note: For production, STRIPE_SECRET_KEY must be the live secret key from Stripe.
     ```
 -   **Supabase Client**: For database interactions, functions might use the Supabase client, often with a service role key for elevated privileges if necessary.
 
@@ -41,23 +42,22 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
     ```
 -   **Logic**:
     1.  Handles CORS preflight (`OPTIONS`) requests.
-    2.  Initializes the Stripe client using `STRIPE_SECRET_KEY`.
-    3.  Calls `stripe.plans.list({ active: true })` to retrieve all active plans from Stripe.
-        -   *Correction*: The Stripe API uses `stripe.prices.list({ active: true, expand: ['data.product'] })` to get prices and their associated product details. Plans are an older API. If using `stripe.plans.list`, it's likely for an older Stripe integration. The frontend seems to expect `price` objects (with `id`, `amount`, `currency`, `interval`, `product` which could be an ID or an expanded object).
+    2.  Initializes the Stripe client using `STRIPE_SECRET_KEY` (this must be the live key in production).
+    3.  Calls `stripe.prices.list({ active: true, expand: ['data.product'] })` to retrieve active prices and associated product details. (Note: The older `stripe.plans.list` API might have been used previously).
     4.  Returns the list of plan/price objects as a JSON response.
--   **Key Environment Variables**: `STRIPE_SECRET_KEY`.
--   **Returns**: A JSON array of Stripe Price/Plan objects.
+-   **Key Environment Variables**: `STRIPE_SECRET_KEY` (Live key for production).
+-   **Returns**: A JSON array of Stripe Price objects.
     ```json
     // Example structure if returning Stripe Price objects
     [
       {
-        "id": "price_1RDlb8IxCwq8UET9kVsVYIsN",
+        "id": "price_1RTkaDDa07Wwp5KNnZF36GsC", // Example Live Price ID
         "object": "price",
         "active": true,
         "amount": 1500, // in cents
         "currency": "usd",
         "interval": "month",
-        "product": "prod_S81eTeDgrCfV5l", // Product ID or expanded Product object
+        "product": "prod_SOXfKdwnyRuvc3", // Example Live Product ID or expanded Product object
         "nickname": "Basic Plan", // Or null
         // ... other price fields
       }
@@ -75,9 +75,9 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
       "create-checkout", // Or "supabase-functions-create-checkout"
       {
         body: {
-          price_id: "price_xxxxxxxxxxxx",
+          price_id: "price_live_xxxxxxxxxxxx", // Live Price ID
           user_id: "auth_user_id_xxxx",
-          return_url: `${window.location.origin}/profile` // Or /success
+          return_url: `${window.location.origin}/profile` // Ensure this points to production domain when live
         },
         headers: {
           "X-Customer-Email": "user@example.com"
@@ -88,18 +88,19 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
 -   **Logic**:
     1.  Handles CORS.
     2.  Extracts `price_id`, `user_id`, and `return_url` from the request body.
-    3.  Initializes Stripe client.
-    4.  Retrieves the user's `stripe_customer_id` from the `users` table in Supabase. If it doesn't exist, a new Stripe Customer is created using the user's email (passed in `X-Customer-Email` header or fetched from DB) and the ID is saved to the `users` table.
+    3.  Initializes Stripe client (using live `STRIPE_SECRET_KEY` in production).
+    4.  Retrieves the user\'s `stripe_customer_id` from the `users` table in Supabase. If it doesn\'t exist, a new Stripe Customer is created using the user\'s email (passed in `X-Customer-Email` header or fetched from DB) and the ID is saved to the `users` table.
     5.  Creates a Stripe Checkout Session using `stripe.checkout.sessions.create()`:
         -   `customer`: The Stripe Customer ID.
-        -   `payment_method_types`: `['card']`.
-        -   `line_items`: Contains the `price_id` and quantity (usually 1).
-        -   `mode`: `'subscription'`.
-        -   `success_url`: The `return_url` provided by the client (e.g., `${frontend_url}/profile?session_id={CHECKOUT_SESSION_ID}`).
-        -   `cancel_url`: A URL to redirect to if the user cancels (e.g., `${frontend_url}/` or back to pricing page).
+        -   `payment_method_types`: [`\'card\'`].
+        -   `line_items`: Contains the `price_id` (which should be a live Price ID in production) and quantity (usually 1).
+        -   `mode`: `\'subscription\'`.
+        -   `success_url`: The `return_url` provided by the client (e.g., `${production_frontend_url}/profile?session_id={CHECKOUT_SESSION_ID}`). Should point to the production frontend URL.
+        -   `cancel_url`: A URL to redirect to if the user cancels (e.g., `${production_frontend_url}/` or back to pricing page). Should point to the production frontend URL.
+        -   `allow_promotion_codes`: `true` (to enable coupon/promotion code entry on the Stripe Checkout page).
         -   `metadata`: Can include `user_id` or other useful information for tracking or webhooks.
     6.  Returns the Stripe Checkout Session URL (`{ url: session.url }`) as JSON.
--   **Key Environment Variables**: `STRIPE_SECRET_KEY`.
+-   **Key Environment Variables**: `STRIPE_SECRET_KEY` (Live key for production).
 -   **Interactions**:
     -   Reads/writes `stripe_customer_id` in the Supabase `users` table.
     -   Creates Stripe Customer and Checkout Session objects.
@@ -109,11 +110,11 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
 
 -   **File**: `supabase/functions/process-lab-result/index.ts` and potentially `supabase/functions/process-lab-result-long/index.ts`.
 -   **Purpose**: To process an uploaded COA PDF: extract text, generate an SEO-friendly description using an AI model, and save the result.
--   **Trigger**: Called by the frontend (`uploadToSupabase` function in `UploadPage.tsx`) after a file is successfully uploaded to Supabase Storage and its initial metadata record is created in `lab_results` with `status: 'processing'`.
+-   **Trigger**: Called by the frontend (`uploadToSupabase` function in `UploadPage.tsx`) after a file is successfully uploaded to Supabase Storage and its initial metadata record is created in `lab_results` with `status: \'processing\'`.
     ```javascript
     // Frontend invocation example
     const { error: functionError } = await supabase.functions.invoke(
-      isLongAnalysis ? 'process-lab-result-long' : 'process-lab-result',
+      isLongAnalysis ? \'process-lab-result-long\' : \'process-lab-result\',
       {
         body: {
           pdfStoragePath: "user_id/timestamp-filename.pdf",
@@ -128,8 +129,8 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
     3.  **Download PDF**: Downloads the PDF file from Supabase Storage using the `pdfStoragePath`.
         ```typescript
         // Example using Supabase client (service role might be needed for direct access)
-        // const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
-        // const { data: fileData, error: downloadError } = await supabaseAdmin.storage.from('labresults').download(pdfStoragePath);
+        // const supabaseAdmin = createClient(Deno.env.get(\'SUPABASE_URL\'), Deno.env.get(\'SUPABASE_SERVICE_ROLE_KEY\'));
+        // const { data: fileData, error: downloadError } = await supabaseAdmin.storage.from(\'labresults\').download(pdfStoragePath);
         ```
     4.  **PDF Text Extraction**: Uses a PDF parsing library (e.g., `pdf-parse` adapted for Deno, or a WASM-based solution) to extract raw text from the downloaded PDF buffer.
     5.  **AI Content Generation**:
@@ -139,10 +140,10 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
         d.  Receives the generated description from the AI.
     6.  **Update Database**: Updates the `lab_results` table for the given `labResultId`:
         -   Sets `description` to the AI-generated content.
-        -   Sets `status` to `'completed'`.
+        -   Sets `status` to `\'completed\'`.
         -   Optionally saves `raw_text`.
-    7.  If any step fails (download, parsing, AI call, DB update), it updates the `lab_results` record `status` to `'error'` and logs the error.
-    8.  Returns a success or error JSON response. The frontend typically relies on polling the `lab_results` table for the final status and description, so the function's direct return might just confirm invocation.
+    7.  If any step fails (download, parsing, AI call, DB update), it updates the `lab_results` record `status` to `\'error\'` and logs the error.
+    8.  Returns a success or error JSON response. The frontend typically relies on polling the `lab_results` table for the final status and description, so the function\'s direct return might just confirm invocation.
 -   **Key Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (if admin client is used), `OPENAI_API_KEY` (or equivalent for other AI services).
 -   **Interactions**:
     -   Reads files from Supabase Storage (`labresults` bucket).
@@ -152,7 +153,7 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
     ```json
     // Example success
     { "message": "Processing initiated for labResultId: <uuid>" }
-    // Example error during function execution (before DB update to 'error')
+    // Example error during function execution (before DB update to \'error\')
     { "error": "Failed to process PDF: <reason>" }
     ```
 
@@ -160,19 +161,20 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
 
 -   **File**: `supabase/functions/payments-webhook/index.ts`
 -   **Purpose**: To handle webhook events from Stripe, keeping user subscription data in Supabase synchronized with Stripe.
--   **Trigger**: Triggered by Stripe when specific events occur (configured in Stripe webhook settings).
+-   **Trigger**: Triggered by Stripe when specific events occur (configured in Stripe webhook settings for the live environment).
 -   **Logic**:
     1.  Handles CORS (though less critical for webhooks, still good practice for testing).
-    2.  **Verify Stripe Signature**: Crucial for security. Reads the `Stripe-Signature` header and the raw request body. Uses `stripe.webhooks.constructEvent` with the `STRIPE_WEBHOOK_SECRET` to verify the event's authenticity.
+    2.  **Verify Stripe Signature**: Crucial for security. Reads the `Stripe-Signature` header and the raw request body. Uses `stripe.webhooks.constructEvent` with the live `STRIPE_WEBHOOK_SECRET` (from environment variables) to verify the event\'s authenticity.
         ```typescript
-        // const signature = req.headers.get('Stripe-Signature');
+        // const signature = req.headers.get(\'Stripe-Signature\');
         // const body = await req.text(); // Raw body
         // let event;
         // try {
-        //   event = stripe.webhooks.constructEvent(body, signature, Deno.env.get('STRIPE_WEBHOOK_SECRET'));
+        //   event = stripe.webhooks.constructEvent(body, signature, Deno.env.get(\'STRIPE_WEBHOOK_SECRET\'));
         // } catch (err) {
         //   return new Response(`Webhook Error: ${err.message}`, { status: 400 });
         // }
+        // Note: For production, STRIPE_WEBHOOK_SECRET must be the live webhook signing secret from Stripe.
         ```
     3.  **Handle Specific Events**: Uses a `switch` statement on `event.type`:
         -   **`checkout.session.completed`**: Occurs when a user successfully completes a Stripe Checkout Session.
@@ -180,8 +182,8 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
             -   Extract `user_id` from session `metadata` (if set during checkout creation).
             -   Update the `users` table for the `user_id`:
                 -   Set `stripe_customer_id`.
-                -   Set `current_plan_id` (from a line item in the session or by fetching the subscription).
-                -   Set `subscription_status` to `'active'` (or the subscription's status).
+                -   Set `current_plan_id` (from a line item in the session or by fetching the subscription - this will be a live Price ID).
+                -   Set `subscription_status` to `\'active\'` (or the subscription\'s status).
                 -   Update `generation_limit` based on the new plan.
                 -   Reset `generations_used` to `0`.
         -   **`customer.subscription.created` / `customer.subscription.updated`**: Occurs when a subscription is created or changes (e.g., upgrade, downgrade, renewal).
@@ -189,19 +191,19 @@ Edge Functions are serverless TypeScript functions that run on Deno. They are us
             -   Find the user in the `users` table by `stripe_customer_id`.
             -   Update `current_plan_id`, `subscription_status`.
             -   Update `generation_limit` according to the new plan.
-            -   Reset `generations_used` if it's a new billing cycle or plan change.
+            -   Reset `generations_used` if it\'s a new billing cycle or plan change.
         -   **`customer.subscription.deleted`**: Occurs when a subscription is canceled and ends.
             -   Extract `customer` (Stripe Customer ID) and `status` (`canceled`).
             -   Find the user by `stripe_customer_id`.
-            -   Set `subscription_status` to `'canceled'` (or similar).
+            -   Set `subscription_status` to `\'canceled\'` (or similar).
             -   Optionally, set `generation_limit` to a free tier limit or `0`.
             -   Set `current_plan_id` to `null`.
         -   **`invoice.payment_succeeded`**: Can be used to confirm ongoing subscription payments and ensure `generations_used` is reset for the new period if not handled by `customer.subscription.updated`.
-    4.  Returns a `200 OK` response to Stripe to acknowledge receipt of the event. If Stripe doesn't receive a 2xx response, it will retry sending the webhook.
--   **Key Environment Variables**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (for Supabase admin client).
+    4.  Returns a `200 OK` response to Stripe to acknowledge receipt of the event. If Stripe doesn\'t receive a 2xx response, it will retry sending the webhook.
+-   **Key Environment Variables**: `STRIPE_SECRET_KEY` (Live key), `STRIPE_WEBHOOK_SECRET` (Live key), `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (for Supabase admin client).
 -   **Interactions**:
     -   Reads/writes to the `users` table in Supabase.
-    -   Interacts with the Stripe API (e.g., to fetch subscription details if not fully included in the event).
+    -   Interacts with the Stripe API (e.g., to fetch subscription details if not fully included in the event) using live keys.
 -   **Returns**: `200 OK` to Stripe. Body can be `{ received: true }`.
 
 These Edge Functions form the core of the backend logic, enabling dynamic data retrieval, secure interactions with Stripe, AI-powered content generation, and synchronization of subscription states. 

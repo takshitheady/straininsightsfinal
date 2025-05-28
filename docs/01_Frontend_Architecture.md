@@ -43,7 +43,7 @@ Client-side routing is managed by `react-router-dom`. The main routes are define
 -   `/profile`: User profile and subscription management (`src/components/pages/Profile.tsx`) - Private Route
 -   `/success`: Page displayed after successful Stripe checkout.
 
-A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that require authentication. It checks the user's authentication status using the `useAuth` hook from `src/supabase/auth.tsx`.
+A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that require authentication. It checks the user's authentication status using the `useAuth` hook from `src/supabase/auth.tsx`. Additionally, key call-to-action buttons (like "Upload" or "Choose Plan") incorporate checks: if a user is not authenticated, they are prompted to log in, often redirecting to the login page with a return path.
 
 ## 5. State Management
 
@@ -67,18 +67,18 @@ A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that re
 -   Users can sign up or log in using email and password.
 -   Supabase handles the authentication flow.
 -   The `useAuth` hook provides user session information and methods like `signInWithEmail`, `signUp`, and `signOut`.
--   Authenticated users are redirected to protected routes, while unauthenticated users attempting to access protected routes are redirected to the login page.
+-   Authenticated users are redirected to protected routes. Unauthenticated users attempting to access protected routes or specific CTAs (e.g., "Upload your PDF", "Choose Plan") are redirected to the login page, often with a redirect query parameter to return them to their original destination after successful login.
 
 ### 7.2. Viewing Pricing Plans
 
--   **Homepage (`home.tsx`)**:
-    -   Fetches plan details (ID, amount, currency, interval, product name) from the `supabase-functions-get-plans` Edge Function.
-    -   Caches this data in `localStorage`.
-    -   Displays plan names and features. Plan names are hardcoded based on plan amount/ID for consistency. Features are also determined client-side based on plan amount/ID.
--   **Upload Page Dialog (`Upload.tsx` using `PricingSection.tsx`)**:
+-   **Homepage (`home.tsx`) and `PricingSection.tsx`**:
+    -   Fetches plan details (Price ID, amount, currency, interval, and expanded product information including `product.name`) from the `supabase-functions-get-plans` Edge Function.
+    -   Caches this data in `localStorage` for 24 hours.
+    -   Displays plan names by prioritizing `plan.product.name` from Stripe, then falling back to a local `planNames` map (keyed by live Price IDs), then `plan.nickname`, and finally the Price ID itself.
+    -   Features are determined client-side based on plan details.
+-   **Upload Page Dialog (`UploadPage.tsx` using `PricingSection.tsx`)**:
     -   When a user hits their generation limit, a dialog appears showing available plans.
-    -   The `PricingSection.tsx` component is reused here.
-    -   It also fetches plan details.
+    -   The `PricingSection.tsx` component is reused here, and it follows the same logic for fetching and displaying plan details and names.
     -   Plan names and features are determined client-side, with overrides possible via props to `PricingSection`.
 
 ### 7.3. File Upload and Processing (`UploadPage.tsx`)
@@ -111,10 +111,10 @@ A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that re
 ### 7.4. Stripe Checkout Integration
 
 -   Initiated from either the `PricingSection.tsx` (in the upgrade dialog) or the main pricing section on `home.tsx`.
--   The `handleCheckout` function is called (either passed as a prop or imported from `stripeUtils.ts`).
--   The `initiateCheckout` function in `lib/stripeUtils.ts` (or a similar one on `home.tsx`) calls the `supabase-functions-create-checkout` Edge Function.
+-   The `handleCheckout` function is called (defined in `home.tsx` or `PricingSection.tsx`, or imported from `lib/stripeUtils.ts`).
+-   This function calls the `supabase-functions-create-checkout` Edge Function.
     -   This function takes the `priceId` and `userId`.
-    -   The Edge Function creates a Stripe Checkout Session and returns the session URL.
+    -   The Edge Function creates a Stripe Checkout Session, ensuring `allow_promotion_codes: true` is set to enable coupon entry on the Stripe-hosted page. It then returns the session URL.
 -   The frontend redirects the user to the Stripe Checkout URL.
 -   After payment, Stripe redirects the user to a success URL (e.g., `/profile` or `/success`).
 

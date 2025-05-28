@@ -24,7 +24,7 @@ This table stores information about registered users, extending the default Supa
 -   `user_id` (UUID, Primary Key, Foreign Key to `auth.users.id`): Supabase Auth User ID.
 -   `email` (TEXT): User's email address (can be synced or duplicated from `auth.users`).
 -   `stripe_customer_id` (TEXT, Nullable): Stripe Customer ID for managing subscriptions.
--   `current_plan_id` (TEXT, Nullable): The Stripe Price ID of the user's current active subscription plan (e.g., `price_1RDlb8IxCwq8UET9kVsVYIsN`).
+-   `current_plan_id` (TEXT, Nullable): The **live** Stripe Price ID of the user's current active subscription plan (e.g., `price_1RTkaDDa07Wwp5KNnZF36GsC`).
 -   `subscription_status` (TEXT, Nullable): Status of the user's Stripe subscription (e.g., `active`, `canceled`, `past_due`).
 -   `generations_used` (INTEGER, Default: 0): Number of COA processing generations used by the user in the current billing cycle or based on their plan.
 -   `generation_limit` (INTEGER, Default: 10): The maximum number of generations allowed for the user based on their plan. (e.g., Basic: 100, Premium: 500. Default 10 might be for a free tier or initial state).
@@ -79,8 +79,8 @@ Serverless TypeScript functions deployed on Supabase. They handle backend logic 
 
 Key Edge Functions:
 
--   **`supabase-functions-get-plans`**: Retrieves active pricing plans from Stripe.
--   **`supabase-functions-create-checkout`**: Creates a Stripe Checkout Session for a user to subscribe to a plan.
+-   **`supabase-functions-get-plans`**: Retrieves active pricing plans from Stripe (using live keys in production).
+-   **`supabase-functions-create-checkout`**: Creates a Stripe Checkout Session (using live keys in production). This function is configured to set `allow_promotion_codes: true` in the Stripe session to enable coupon usage.
 -   **`process-lab-result` / `process-lab-result-long`**: The core COA processing functions. They:
     -   Are triggered after a file is uploaded and its metadata is saved.
     -   Fetch the PDF from Supabase Storage.
@@ -95,19 +95,20 @@ Key Edge Functions:
 
 ## 7. Environment Variables
 
-Supabase Edge Functions and the Supabase project itself rely on environment variables for configuration, especially for API keys.
+Supabase Edge Functions and the Supabase project itself rely on environment variables for configuration, especially for API keys. For production, these must be the **live keys** from the respective services.
 
--   `STRIPE_SECRET_KEY`: Stripe secret API key (for backend functions).
--   `STRIPE_WEBHOOK_SECRET`: Stripe webhook signing secret for verifying webhook events.
+-   `STRIPE_SECRET_KEY`: **Live** Stripe secret API key (for backend functions).
+-   `STRIPE_WEBHOOK_SECRET`: **Live** Stripe webhook signing secret for verifying webhook events from the live Stripe environment.
 -   `OPENAI_API_KEY` (or similar for other AI services): API key for the AI service used in `process-lab-result` functions.
--   Supabase URL and Anon Key: Used by the frontend client and Edge Functions to interact with Supabase services. These are typically set automatically within the Supabase environment for functions, and in `.env` files for local frontend development.
+-   Supabase URL and Anon Key: Used by the frontend client and Edge Functions to interact with Supabase services. These are typically set automatically within the Supabase environment for functions, and in `.env` files (e.g., `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) for local frontend development.
+-   `VITE_STRIPE_PUBLISHABLE_KEY`: **Live** Stripe publishable key for use in the frontend.
 
 ## 8. Security Considerations
 
 -   **Row Level Security (RLS)**: Implemented on Supabase tables (`users`, `lab_results`) to ensure users can only access their own data.
 -   **Storage Policies**: Configured for the `labresults` bucket to control file access.
--   **Environment Variable Management**: API keys and secrets are stored as environment variables in Supabase, not hardcoded.
--   **Webhook Security**: Stripe webhook endpoints verify signatures to prevent malicious requests.
+-   **Environment Variable Management**: API keys and secrets are stored as environment variables in Supabase, not hardcoded. Ensure live keys are protected and only used in the production environment.
+-   **Webhook Security**: Stripe webhook endpoints verify signatures to prevent malicious requests. Use the live webhook secret for the live endpoint.
 -   **Input Validation**: Edge Functions should validate inputs received from the client.
 
 This architecture leverages Supabase's integrated services to provide a robust and scalable backend with minimal operational overhead. 

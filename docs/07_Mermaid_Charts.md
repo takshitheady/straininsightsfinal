@@ -61,17 +61,17 @@ classDiagram
 
     class EdgeFunctions {
         <<Deno Runtime>>
-        +get-plans()
-        +create-checkout()
+        +get-plans() (fetches live plans)
+        +create-checkout() (handles live price IDs, allow_promotion_codes)
         +process-lab-result()
-        +payments-webhook()
+        +payments-webhook() (handles live events & secrets)
     }
 
     class StripeAPI {
         <<External Service>>
-        +Manages products, prices, subscriptions
+        +Manages products, prices (live & test), subscriptions
         +Processes payments
-        +Sends webhook events
+        +Sends webhook events (for live & test environments)
     }
 
     class AIService {
@@ -90,7 +90,7 @@ erDiagram
         uuid user_id PK
         text email
         text stripe_customer_id
-        text current_plan_id
+        text current_plan_id "Live Stripe Price ID"
         text subscription_status
         int generations_used
         int generation_limit

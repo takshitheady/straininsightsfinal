@@ -51,11 +51,12 @@ interface PricingSectionProps {
 
 // Custom plan names mapping - can be a reliable fallback
 const planNames = {
-  'SC9FWWIFZ7QDCM': 'Premium Plan', // Example: Price ID for $99 plan
-  'SC9FJQGAEZLGH5': 'Basic Plan',    // Example: Price ID for $39 plan
-  // Add your actual current Price IDs here if different and map them to desired names
-  'price_1RRwv8DCXlQWdJgdtLj4Xjlr': 'Basic Plan', // Assuming this is $39
-  'price_1RRwuODCXlQWdJgd5P6bAID9': 'Premium Plan' // Assuming this is $99
+  'price_1RTkaDDa07Wwp5KNnZF36GsC': 'Basic Plan', // Corrected Live Basic Plan Price ID
+  'price_1RTka9Da07Wwp5KNiRxFGnsG': 'Premium Plan', // Corrected Live Premium Plan Price ID
+  // 'SC9FWWIFZ7QDCM': 'Premium Plan', // Example: Price ID for $99 plan - commented out old/example
+  // 'SC9FJQGAEZLGH5': 'Basic Plan',    // Example: Price ID for $39 plan - commented out old/example
+  // 'price_1RRwv8DCXlQWdJgdtLj4Xjlr': 'Basic Plan', // Assuming this is $39 - commented out old/example
+  // 'price_1RRwuODCXlQWdJgd5P6bAID9': 'Premium Plan' // Assuming this is $99 - commented out old/example
 };
 
 // Updated default features with the new requested items

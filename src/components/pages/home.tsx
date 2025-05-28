@@ -31,7 +31,7 @@ import {
   BarChart,
   DollarSign,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../../supabase/auth";
 import { useEffect, useState } from "react";
 import { supabase } from "../../../supabase/supabase";
@@ -126,6 +126,7 @@ const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 export default function LandingPage() {
   const { user, signOut } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate(); // Import and use useNavigate for programmatic navigation
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [error, setError] = useState("");
@@ -135,8 +136,8 @@ export default function LandingPage() {
 
   // Custom plan names mapping - this can be a fallback or removed
   const planNames = {
-    'price_1RTKADDA07WWP5KNNZF36GSC': 'Basic Plan', // Current $39 Price ID
-    'price_1RTKA9DA07WWP5KNIRXFGNSG': 'Premium Plan', // Current $99 Price ID
+    'price_1RTkaDDa07Wwp5KNnZF36GsC': 'Basic Plan', // Corrected Live Basic Plan Price ID
+    'price_1RTka9Da07Wwp5KNiRxFGnsG': 'Premium Plan', // Corrected Live Premium Plan Price ID
   };
 
   useEffect(() => {
@@ -187,6 +188,20 @@ export default function LandingPage() {
       setError("Failed to load plans. Please try again later.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Helper function for protected links
+  const handleProtectedLink = (path: string, astra: string = "") => {
+    if (!user) {
+      toast({
+        title: "Authentication required",
+        description: "Please sign in to continue.",
+        variant: "default",
+      });
+      navigate(`/login?redirect=${encodeURIComponent(path)}`);
+    } else {
+      navigate(path);
     }
   };
 
@@ -505,15 +520,14 @@ export default function LandingPage() {
                   Bring your lab result PDFs and get SEO-ready content generated instantly. Our AI is expertly trained on extracting COA data to streamline your workflow and boost your online presence.
                 </motion.p>
                 <motion.div variants={fadeIn} className="flex justify-center lg:justify-start">
-                  <Link to="/upload">
-                    <Button
-                      size="lg"
-                      className="bg-brand-green text-white hover:bg-green-600 font-semibold text-2xl px-12 py-6 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
-                    >
-                      Upload your PDF
-                      <ArrowRight className="ml-3 h-7 w-7" />
-                    </Button>
-                  </Link>
+                  <Button
+                    size="lg"
+                    className="bg-brand-green text-white hover:bg-green-600 font-semibold text-2xl px-12 py-6 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
+                    onClick={() => handleProtectedLink("/upload", "hero")}
+                  >
+                    Upload your PDF
+                    <ArrowRight className="ml-3 h-7 w-7" />
+                  </Button>
                 </motion.div>
                 <motion.div
                   variants={fadeIn}
@@ -629,15 +643,14 @@ export default function LandingPage() {
               variants={fadeIn}
               className="text-center mt-16 lg:mt-20"
             >
-              <Link to="/upload">
-                <Button
-                  size="lg"
-                  className="bg-brand-green text-white hover:bg-green-600 font-semibold text-base px-8 py-3 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
-                >
-                  Go to Upload
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-              </Link>
+              <Button
+                size="lg"
+                className="bg-brand-green text-white hover:bg-green-600 font-semibold text-base px-8 py-3 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
+                onClick={() => handleProtectedLink("/upload", "features-cta")}
+              >
+                Go to Upload
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
             </motion.div>
           </div>
         </section>
@@ -738,7 +751,7 @@ export default function LandingPage() {
                       onClick={() => handleCheckout(plan.id)}
                         disabled={isLoading && processingPlanId === plan.id}
                     >
-                        {isLoading && processingPlanId === plan.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : ((plan.product && typeof plan.product === 'object' && (plan.product.name?.toLowerCase().includes('pro') || plan.product.name?.toLowerCase().includes('premium'))) || plan.amount === 9900 ? 'Get Started' : 'Choose Plan')}
+                        {isLoading && processingPlanId === plan.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Choose Plan'}
                     </Button>
                   </CardFooter>
                 </Card>
@@ -835,11 +848,11 @@ export default function LandingPage() {
             <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.6 }} variants={fadeIn} className="bg-white/5 backdrop-blur-sm rounded-2xl p-10 md:p-16 shadow-xl border border-white/10 text-center">
               <h2 className="font-serif text-3xl md:text-4xl lg:text-5xl font-medium mb-6 text-white">Ready to Streamline Your Lab Results?</h2>
               <p className="text-lg md:text-xl mb-10 text-gray-300 max-w-2xl mx-auto">Start leveraging AI for faster, more accurate COA analysis today.</p>
-              <Link to="/upload">
-                <Button size="lg" className="bg-brand-green text-white hover:bg-green-600 font-semibold text-2xl px-16 py-5 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30">
-                  Upload
-                    </Button>
-                  </Link>
+              <Button size="lg" className="bg-brand-green text-white hover:bg-green-600 font-semibold text-2xl px-16 py-5 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
+                onClick={() => handleProtectedLink("/upload", "main-cta")}
+              >
+                Upload
+                  </Button>
             </motion.div>
           </div>
         </section>

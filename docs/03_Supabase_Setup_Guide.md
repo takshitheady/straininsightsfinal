@@ -30,7 +30,7 @@ This table complements the built-in `auth.users` table.
     -   `user_id`: Type `uuid`. Set as Primary Key. Set as Foreign Key to `auth.users.id` with `ON UPDATE CASCADE` and `ON DELETE CASCADE` actions.
     -   `email`: Type `text`. Can be nullable if you don't always duplicate it from `auth.users`.
     -   `stripe_customer_id`: Type `text`. Nullable.
-    -   `current_plan_id`: Type `text`. Nullable. (This would be a Stripe Price ID).
+    -   `current_plan_id`: Type `text`. Nullable. (This would be a **live** Stripe Price ID in production, e.g., `price_1RTkaDDa07Wwp5KNnZF36GsC`).
     -   `subscription_status`: Type `text`. Nullable.
     -   `generations_used`: Type `int4` (integer). Default value `0`.
     -   `generation_limit`: Type `int4` (integer). Default value (e.g., `10` for a free tier, or a higher value if you have default paid plans).
@@ -78,8 +78,8 @@ RLS is critical for protecting user data. Enable RLS for both `users` and `lab_r
 -   Navigate to "Authentication" -> "Providers" in your Supabase dashboard.
 -   Email/Password provider is enabled by default. Configure other providers if needed.
 -   Under "Authentication" -> "Settings", you can configure email templates, redirect URLs, etc.
-    -   **Site URL**: Set this to your frontend deployment URL (e.g., `http://localhost:5174` for local dev, or your production URL).
-    -   **Additional Redirect URLs**: Add any other URLs your app might redirect to after authentication.
+    -   **Site URL**: Set this to your frontend deployment URL (e.g., `http://localhost:5174` for local dev, or your **production URL** for live).
+    -   **Additional Redirect URLs**: Add any other URLs your app might redirect to after authentication, ensuring production URLs are used for the live environment.
 
 ## 5. Storage Setup
 
@@ -126,9 +126,9 @@ RLS is critical for protecting user data. Enable RLS for both `users` and `lab_r
 
 4.  **Environment Variables for Functions**:
     -   Go to "Project Settings" -> "Functions" in your Supabase dashboard.
-    -   Add necessary environment variables (secrets) that your Edge Functions will use:
-        -   `STRIPE_SECRET_KEY`: Your Stripe secret key.
-        -   `STRIPE_WEBHOOK_SECRET`: Your Stripe webhook signing secret (for the `payments-webhook` function).
+    -   Add necessary environment variables (secrets) that your Edge Functions will use. **For a live/production environment, ensure you use your LIVE Stripe keys.**
+        -   `STRIPE_SECRET_KEY`: Your **live** Stripe secret key (e.g., `sk_live_...`).
+        -   `STRIPE_WEBHOOK_SECRET`: Your **live** Stripe webhook signing secret (obtained when creating the live webhook endpoint in Stripe).
         -   `OPENAI_API_KEY` (or similar): API key for your AI service.
         -   The Supabase URL and Anon Key are usually available by default to functions, but for some operations (like using the admin client), you might need `SUPABASE_SERVICE_ROLE_KEY`.
 
@@ -144,18 +144,21 @@ RLS is critical for protecting user data. Enable RLS for both `users` and `lab_r
 
 ## 7. Stripe Setup
 
-1.  **Create Products and Prices in Stripe**:
-    -   Log in to your Stripe Dashboard.
+**Important Note for Live Environment**: When transitioning from a test/sandbox environment to a live production environment, all Stripe entities (Products, Prices, API Keys, Webhook Endpoints) must be recreated or switched to their live mode equivalents within your Stripe dashboard. Live entities will have different IDs than their test counterparts.
+
+1.  **Create Products and Prices in Stripe (Live Mode)**:
+    -   Log in to your **live** Stripe Dashboard.
     -   Go to "Products" and create products for your plans (e.g., "Basic Plan", "Premium Plan").
-    -   For each product, create one or more prices (e.g., a monthly recurring price). Note the Price IDs (e.g., `price_xxxxxxxxxxxx`). These IDs are used by your application (`current_plan_id` in `users` table, and for checkout).
-2.  **API Keys**: Get your Stripe API keys (Publishable Key for frontend, Secret Key for backend/Edge Functions) from the Stripe Dashboard under "Developers" -> "API keys".
-3.  **Webhook Endpoint**: For the `payments-webhook` Edge Function:
-    -   In your Supabase dashboard, get the URL for your deployed `payments-webhook` function.
-    -   In Stripe Dashboard, go to "Developers" -> "Webhooks".
-    -   Click "Add endpoint".
+    -   For each product, create one or more prices (e.g., a monthly recurring price). Note the **live Price IDs** (e.g., `price_live_xxxxxxxxxxxx`). These live IDs are used by your application (`current_plan_id` in `users` table, and for checkout). If you use a frontend mapping for plan names (like `planNames`), ensure it uses these live Price IDs.
+    -   When creating prices or products, you can configure if they are eligible for promotion codes under their respective settings in the Stripe dashboard if you intend to use coupons.
+2.  **API Keys (Live Mode)**: Get your **live** Stripe API keys (Publishable Key for frontend, Secret Key for backend/Edge Functions) from the Stripe Dashboard under "Developers" -> "API keys".
+3.  **Webhook Endpoint (Live Mode)**: For the `payments-webhook` Edge Function:
+    -   In your Supabase dashboard, get the URL for your deployed `payments-webhook` function (this URL is usually static, like `https://<YOUR_PROJECT_ID>.supabase.co/functions/v1/payments-webhook`).
+    -   In your **live** Stripe Dashboard, go to "Developers" -> "Webhooks".
+    -   Click "Add endpoint". **You must create a new endpoint for live mode; you cannot reuse a sandbox endpoint.**
     -   Paste the Edge Function URL as the "Endpoint URL".
     -   Select the events to listen for (e.g., `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`).
-    -   Note the **Signing secret** for this webhook endpoint. You'll set this as `STRIPE_WEBHOOK_SECRET` in your Supabase function settings.
+    -   Note the **Signing secret** for this **live** webhook endpoint. You'll set this as `STRIPE_WEBHOOK_SECRET` (the live version) in your Supabase function settings.
 
 ## 8. Frontend Configuration
 
@@ -163,14 +166,16 @@ RLS is critical for protecting user data. Enable RLS for both `users` and `lab_r
     ```bash
     npm install # or yarn install
     ```
-2.  **Environment Variables for Frontend**:
-    Create a `.env` file in the root of your frontend project (e.g., `straininsights/`) with your Supabase URL and Anon Key:
+2.  **Environment Variables for Frontend (Live Mode)**:
+    Create a `.env` file (or configure environment variables in your deployment platform) in the root of your frontend project with your Supabase URL, Anon Key, and **live Stripe Publishable Key**:
     ```
     VITE_SUPABASE_URL=https://<YOUR_PROJECT_ID>.supabase.co
     VITE_SUPABASE_ANON_KEY=<YOUR_SUPABASE_ANON_KEY>
+    VITE_STRIPE_PUBLISHABLE_KEY=<YOUR_LIVE_STRIPE_PUBLISHABLE_KEY> # e.g., pk_live_...
     ```
-    Replace placeholders with your actual Supabase project URL and Anon Key (from Project Settings -> API in your Supabase dashboard).
+    Replace placeholders with your actual Supabase project URL, Anon Key (from Project Settings -> API in your Supabase dashboard), and your live Stripe Publishable Key.
 3.  **Update Supabase Client**: Ensure `src/supabase/supabase.ts` is correctly initialized with these environment variables.
+4.  **Production Redirect URLs**: Ensure that the `return_url` used when creating Stripe checkout sessions (typically in `home.tsx` or `stripeUtils.ts`) points to your production domain (e.g., `https://yourdomain.com/profile`).
 
 ## 9. Testing
 
