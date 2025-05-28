@@ -135,13 +135,8 @@ export default function LandingPage() {
 
   // Custom plan names mapping - this can be a fallback or removed
   const planNames = {
-    'SC9FWWIFZ7QDCM': 'Premium Plan', // Example new Premium ID (if different from Stripe product name)
-    'SC9FJQGAEZLGH5': 'Basic Plan',    // Example new Basic ID (if different from Stripe product name)
-    'price_1RRwv8DCXlQWdJgdtLj4Xjlr': 'Basic Plan', // Current $39 Price ID
-    'price_1RRwuODCXlQWdJgd5P6bAID9': 'Premium Plan', // Current $99 Price ID
-    // Adding old IDs as requested by user for home.tsx display
-    'PRICE_1RHLLPDCXLQWDJGDS7S5K7O7': 'Basic Plan', 
-    'PRICE_1RHLMCDCXLQWDJGDVON9UQZP': 'Premium Plan'
+    'price_1RTKADDA07WWP5KNNZF36GSC': 'Basic Plan', // Current $39 Price ID
+    'price_1RTKA9DA07WWP5KNIRXFGNSG': 'Premium Plan', // Current $99 Price ID
   };
 
   useEffect(() => {
