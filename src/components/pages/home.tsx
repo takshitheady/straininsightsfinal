@@ -520,14 +520,14 @@ export default function LandingPage() {
                   Bring your lab result PDFs and get SEO-ready content generated instantly. Our AI is expertly trained on extracting COA data to streamline your workflow and boost your online presence.
                 </motion.p>
                 <motion.div variants={fadeIn} className="flex justify-center lg:justify-start">
-                  <Button
-                    size="lg"
-                    className="bg-brand-green text-white hover:bg-green-600 font-semibold text-2xl px-12 py-6 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
+                    <Button
+                      size="lg"
+                      className="bg-brand-green text-white hover:bg-green-600 font-semibold text-2xl px-12 py-6 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
                     onClick={() => handleProtectedLink("/upload", "hero")}
-                  >
-                    Upload your PDF
-                    <ArrowRight className="ml-3 h-7 w-7" />
-                  </Button>
+                    >
+                      Upload your PDF
+                      <ArrowRight className="ml-3 h-7 w-7" />
+                    </Button>
                 </motion.div>
                 <motion.div
                   variants={fadeIn}
@@ -643,14 +643,14 @@ export default function LandingPage() {
               variants={fadeIn}
               className="text-center mt-16 lg:mt-20"
             >
-              <Button
-                size="lg"
-                className="bg-brand-green text-white hover:bg-green-600 font-semibold text-base px-8 py-3 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
+                <Button
+                  size="lg"
+                  className="bg-brand-green text-white hover:bg-green-600 font-semibold text-base px-8 py-3 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
                 onClick={() => handleProtectedLink("/upload", "features-cta")}
-              >
-                Go to Upload
-                <ArrowRight className="ml-2 h-5 w-5" />
-              </Button>
+                >
+                  Go to Upload
+                  <ArrowRight className="ml-2 h-5 w-5" />
+                </Button>
             </motion.div>
           </div>
         </section>
@@ -851,8 +851,8 @@ export default function LandingPage() {
               <Button size="lg" className="bg-brand-green text-white hover:bg-green-600 font-semibold text-2xl px-16 py-5 transition-transform hover:scale-105 shadow-lg hover:shadow-brand-green/30"
                 onClick={() => handleProtectedLink("/upload", "main-cta")}
               >
-                Upload
-                  </Button>
+                  Upload
+                    </Button>
             </motion.div>
           </div>
         </section>
