@@ -529,19 +529,6 @@ export default function LandingPage() {
                       <ArrowRight className="ml-3 h-7 w-7" />
                     </Button>
                 </motion.div>
-                <motion.div
-                  variants={fadeIn}
-                  className="pt-6 text-sm text-gray-400"
-                >
-                  <span className="font-semibold uppercase tracking-wider text-white text-base">Trusted By:</span>
-                  <div className="flex justify-center lg:justify-start space-x-8 mt-6 opacity-90">
-                    {/* Replace with actual logos if available */}
-                    <span className="text-gray-200 font-medium text-lg hover:text-white transition-colors">nuEra</span>
-                    <span className="text-gray-200 font-medium text-lg hover:text-white transition-colors">RawGarden</span>
-                    <span className="text-gray-200 font-medium text-lg hover:text-white transition-colors">HighHaven</span>
-                    <span className="text-gray-200 font-medium text-lg hover:text-white transition-colors">Binske&Oni</span>
-                  </div>
-                </motion.div>
               </motion.div>
 
               {/* Right Metrics Cards - Now a Carousel */}
