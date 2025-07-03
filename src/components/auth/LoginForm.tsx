@@ -12,9 +12,11 @@ import {
 import { Label } from "@/components/ui/label";
 import { useNavigate, Link } from "react-router-dom";
 import AuthLayout from "./AuthLayout";
-import { LogIn, Loader2 } from "lucide-react";
+import { LogIn, Loader2, AlertCircle } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/use-toast";
+import { AuthError } from "@supabase/supabase-js";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function LoginForm() {
   const [email, setEmail] = useState("");
@@ -26,14 +28,56 @@ export default function LoginForm() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const getErrorMessage = (error: AuthError): string => {
+    // Handle specific error codes for better user experience
+    switch (error.message) {
+      case "Invalid login credentials":
+        return "Invalid email or password. Please check your credentials and try again.";
+      case "Email not confirmed":
+        return "Please check your email and click the confirmation link before signing in.";
+      case "Too many requests":
+        return "Too many login attempts. Please wait a few minutes before trying again.";
+      case "Signup is disabled":
+        return "New account creation is currently disabled. Please contact support.";
+      default:
+        // Handle error codes if available
+        if (error.status === 400) {
+          return "Invalid email or password. Please check your credentials and try again.";
+        }
+        if (error.status === 422) {
+          return "Unable to process your request. Please try again.";
+        }
+        if (error.status === 429) {
+          return "Too many requests. Please wait a few minutes before trying again.";
+        }
+        if (error.status === 500) {
+          return "Server error. Please try again later.";
+        }
+        
+        // Generic fallback
+        return error.message || "An error occurred during sign in. Please try again.";
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError("");
+    
     try {
       await signIn(email, password);
       navigate("/");
     } catch (error) {
-      setError("Invalid email or password");
+      // Only log unexpected errors to console, not user input errors
+      if (error instanceof AuthError && error.message !== "Invalid login credentials") {
+        console.error("Login error:", error);
+      }
+      
+      if (error instanceof AuthError) {
+        setError(getErrorMessage(error));
+      } else {
+        setError("An unexpected error occurred. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -41,13 +85,24 @@ export default function LoginForm() {
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
+    setError("");
+    
     try {
       await signInWithGoogle();
     } catch (error: any) {
       console.error("Google signin error:", error);
+      
+      let errorMessage = "Failed to sign in with Google. Please try again.";
+      
+      if (error instanceof AuthError) {
+        errorMessage = getErrorMessage(error);
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
       toast({
         title: "Google sign in failed",
-        description: error.message || "Failed to sign in with Google",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -136,8 +191,23 @@ export default function LoginForm() {
                 required
                 disabled={loading || googleLoading}
               />
+              <div className="flex justify-end">
+                <Link 
+                  to="/forgot-password" 
+                  className="text-sm text-primary hover:underline"
+                >
+                  Forgot your password?
+                </Link>
+              </div>
             </div>
-            {error && <p className="text-sm text-red-500">{error}</p>}
+            
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            
             <Button type="submit" className="w-full" disabled={loading || googleLoading}>
               {loading ? (
                 <>

@@ -12,9 +12,11 @@ import {
 import { Label } from "@/components/ui/label";
 import { useNavigate, Link } from "react-router-dom";
 import AuthLayout from "./AuthLayout";
-import { UserPlus, Loader2 } from "lucide-react";
+import { UserPlus, Loader2, AlertCircle } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/use-toast";
+import { AuthError } from "@supabase/supabase-js";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function SignUpForm() {
   const [email, setEmail] = useState("");
@@ -26,6 +28,39 @@ export default function SignUpForm() {
   const { signUp, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  const getErrorMessage = (error: AuthError): string => {
+    // Handle specific error codes for better user experience
+    switch (error.message) {
+      case "User already registered":
+        return "This email is already registered. Please log in instead.";
+      case "Email rate limit exceeded":
+        return "Too many emails sent. Please wait before trying again.";
+      case "Signup is disabled":
+        return "New account creation is currently disabled. Please contact support.";
+      case "Password should be at least 6 characters":
+        return "Password must be at least 6 characters long.";
+      case "Unable to validate email address: invalid format":
+        return "Please enter a valid email address.";
+      default:
+        // Handle error codes if available
+        if (error.status === 400) {
+          return "Invalid form data. Please check your email and password.";
+        }
+        if (error.status === 422) {
+          return "Unable to process your request. Please check your information and try again.";
+        }
+        if (error.status === 429) {
+          return "Too many requests. Please wait a few minutes before trying again.";
+        }
+        if (error.status === 500) {
+          return "Server error. Please try again later.";
+        }
+        
+        // Generic fallback
+        return error.message || "An error occurred during sign up. Please try again.";
+    }
+  };
 
   const validateForm = () => {
     // Clear any previous errors
@@ -62,6 +97,8 @@ export default function SignUpForm() {
     }
     
     setLoading(true);
+    setError("");
+    
     try {
       await signUp(email, password, fullName);
       toast({
@@ -71,29 +108,21 @@ export default function SignUpForm() {
       });
       navigate("/login");
     } catch (error: any) {
-      console.error("Signup error:", error);
-      
-      // Extract the specific error message from Supabase if available
-      let errorMessage = "Error creating account";
-      
-      if (error.message) {
-        errorMessage = error.message;
-      } else if (error.error_description) {
-        errorMessage = error.error_description;
+      // Only log unexpected errors to console, not user input errors
+      const expectedErrors = ["User already registered", "Email rate limit exceeded"];
+      if (error instanceof AuthError && !expectedErrors.includes(error.message)) {
+        console.error("Signup error:", error);
       }
       
-      // Handle specific known error cases
-      if (errorMessage.includes("User already registered")) {
-        errorMessage = "This email is already registered. Please log in instead.";
-      } else if (errorMessage.includes("422")) {
-        errorMessage = "Invalid form data. Please check your email and password.";
+      if (error instanceof AuthError) {
+        setError(getErrorMessage(error));
+      } else {
+        setError("An unexpected error occurred. Please try again.");
       }
-      
-      setError(errorMessage);
       
       toast({
         title: "Sign up failed",
-        description: errorMessage,
+        description: error instanceof AuthError ? getErrorMessage(error) : "An unexpected error occurred. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -103,13 +132,24 @@ export default function SignUpForm() {
 
   const handleGoogleSignUp = async () => {
     setGoogleLoading(true);
+    setError("");
+    
     try {
       await signInWithGoogle();
     } catch (error: any) {
       console.error("Google signup error:", error);
+      
+      let errorMessage = "Failed to sign up with Google. Please try again.";
+      
+      if (error instanceof AuthError) {
+        errorMessage = getErrorMessage(error);
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
       toast({
         title: "Google sign up failed",
-        description: error.message || "Failed to sign up with Google",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -212,7 +252,14 @@ export default function SignUpForm() {
               />
               <p className="text-xs text-gray-500">Password must be at least 6 characters long</p>
             </div>
-            {error && <p className="text-sm text-red-500 p-2 bg-red-50 rounded border border-red-200">{error}</p>}
+            
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? (
                 <>

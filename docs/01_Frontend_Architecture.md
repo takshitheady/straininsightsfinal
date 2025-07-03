@@ -62,25 +62,141 @@ A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that re
 
 ## 7. Key User Interactions & Flows
 
-### 7.1. Authentication
+### 7.1. Authentication System (Comprehensive)
 
-**Enhanced Authentication System with Google OAuth:**
+**Enhanced Multi-Provider Authentication with Error Handling:**
 
--   **Email/Password Authentication**: Traditional sign-up and login using email and password.
+#### 7.1.1. Authentication Methods
+
+-   **Email/Password Authentication**: 
+    -   Traditional sign-up and login with enhanced error handling
+    -   Specific error messages for all failure scenarios
+    -   Clean console logging (filters expected user errors like wrong passwords)
+    -   Rate limiting feedback for too many attempts
+
 -   **Google OAuth Integration**: 
-    -   Users can sign up or log in using their Google accounts
+    -   Seamless Google sign-up and login experience
     -   Implemented in both `LoginForm.tsx` and `SignUpForm.tsx`
-    -   Features official Google branding and consistent UI/UX
-    -   Includes loading states and comprehensive error handling
-    -   Automatic redirect to `/upload` after successful Google authentication
+    -   Official Google branding with consistent UI/UX
+    -   Comprehensive loading states and error handling
+    -   Automatic redirect to `/upload` after successful authentication
+    -   Profile creation integration for new OAuth users
 
--   **Authentication Context**: The `useAuth` hook provides user session information and methods:
-    -   `signInWithEmail`: Email/password login
-    -   `signInWithGoogle`: Google OAuth login
-    -   `signUp`: Email/password registration
-    -   `signOut`: User logout
+-   **Password Reset System**:
+    -   Complete forgot password functionality (`ForgotPasswordForm.tsx`)
+    -   Email-based password recovery with custom branded templates
+    -   Token verification and secure password reset (`ResetPasswordForm.tsx`)
+    -   Auto-redirect flow after successful password reset
 
--   **Protected Routes**: Authenticated users are redirected to protected routes. Unauthenticated users attempting to access protected routes or specific CTAs are redirected to the login page with a redirect query parameter.
+#### 7.1.2. Enhanced Error Handling
+
+**Comprehensive Error Management System:**
+
+-   **Authentication Forms Error Handling**:
+    ```typescript
+    const getErrorMessage = (error: AuthError): string => {
+      switch (error.message) {
+        case "Invalid login credentials":
+          return "Invalid email or password. Please check your credentials and try again.";
+        case "Email not confirmed":
+          return "Please check your email and click the confirmation link before signing in.";
+        case "Too Many Requests":
+          return "Too many login attempts. Please wait a moment before trying again.";
+        // ... additional specific error cases
+      }
+    };
+    ```
+
+-   **Visual Error Display**: 
+    -   Alert component integration for consistent error presentation
+    -   Red destructive alerts for errors with appropriate icons
+    -   Clear, actionable error messages
+    -   Error state clearing on new attempts
+
+-   **Console Logging**: 
+    -   Filters out expected user errors (wrong passwords, invalid emails)
+    -   Logs only unexpected errors for debugging
+    -   Clean development experience without noise
+
+#### 7.1.3. Password Reset Flow Components
+
+**ForgotPasswordForm.tsx Features:**
+-   Email input with real-time validation
+-   Loading states during reset request
+-   Success state with clear instructions
+-   Error handling for reset-specific issues
+-   Navigation back to login form
+
+**ResetPasswordForm.tsx Features:**
+-   URL parameter handling for password reset tokens
+-   Session verification with Supabase (`verifyOtp`)
+-   Password strength validation (minimum 6 characters)
+-   Password confirmation matching
+-   Invalid/expired token handling with fallback UI
+-   Auto-redirect to login after successful reset
+
+#### 7.1.4. Authentication Context
+
+**Enhanced `useAuth` Hook** provides comprehensive authentication management:
+
+```typescript
+const {
+  user,              // Current authenticated user
+  loading,           // Authentication loading state
+  signInWithEmail,   // Email/password login
+  signInWithGoogle,  // Google OAuth login  
+  signUp,            // Email/password registration
+  signOut,           // User logout
+  resetPassword,     // Password reset initiation
+  updatePassword     // Secure password update
+} = useAuth();
+```
+
+**Features:**
+-   Centralized session management across the application
+-   Real-time authentication state updates
+-   Automatic session persistence and refresh
+-   Unified error handling for all authentication methods
+-   Protected route integration with redirect logic
+
+#### 7.1.5. UI/UX Enhancements
+
+**Consistent Design System:**
+-   Alert components for error and success states
+-   Loading spinners with descriptive text
+-   Disabled form controls during processing
+-   Clear navigation between authentication forms
+-   Mobile-responsive design for all auth components
+
+**Navigation Flow:**
+-   Seamless transitions between login, signup, forgot password, and reset forms
+-   "Forgot Password?" link in login form
+-   "Back to Login" options in all auxiliary forms
+-   Auto-redirect handling after successful operations
+-   Return path preservation for post-authentication navigation
+
+**Visual Feedback:**
+-   Success states with green checkmarks and confirmation messages
+-   Error states with red alerts and specific error descriptions
+-   Loading states with spinners and progress indicators
+-   Clear call-to-action buttons with appropriate icons
+
+#### 7.1.6. Route Integration
+
+**Authentication Routes:**
+```typescript
+// Enhanced routing configuration in App.tsx
+<Route path="/login" element={<LoginForm />} />
+<Route path="/signup" element={<SignUpForm />} />
+<Route path="/forgot-password" element={<ForgotPasswordForm />} />
+<Route path="/reset-password" element={<ResetPasswordForm />} />
+```
+
+**Protected Routes**: 
+-   Automatic redirect to login for unauthenticated users
+-   Return path preservation with query parameters
+-   Integration with call-to-action buttons throughout the app
+-   Session validation for sensitive operations
 
 ### 7.2. Profile Page & Subscription Management
 
@@ -181,23 +297,43 @@ A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that re
 
 ## 9. Recent Enhancements
 
-### 9.1. Google OAuth Integration
+### 9.1. Comprehensive Authentication System
+- **Enhanced Error Handling**: Specific, user-friendly error messages for all authentication scenarios
+- **Clean Console Logging**: Filters expected user errors while maintaining debugging information
+- **Password Reset System**: Complete forgot password flow with email verification and token validation
+- **Alert Component Integration**: Consistent error and success state presentation across all forms
+- **Loading States**: Comprehensive loading indicators with descriptive text and disabled controls
+
+### 9.2. Google OAuth Integration
 - Seamless Google sign-in/sign-up across authentication forms
 - Consistent branding and user experience
 - Automatic redirect handling post-authentication
+- Profile creation integration for new OAuth users
 
-### 9.2. Enhanced Profile Management
+### 9.3. Password Reset Functionality
+- **ForgotPasswordForm**: Email-based password reset initiation with validation
+- **ResetPasswordForm**: Secure password reset with token verification
+- **Custom Email Templates**: Professional branded email templates with StrainInsights styling
+- **Token Security**: 5-minute expiration with single-use validation
+- **Rate Limiting**: 3 password reset emails per hour per address
+- **Graceful Error Handling**: Clear fallbacks for invalid/expired tokens
+
+### 9.4. Enhanced Profile Management
 - Comprehensive billing management with plan selection dialogs
 - Smart account status determination based on plan types
 - Visual indicators for current plans and upgrade options
 
-### 9.3. Generation Preservation System
+### 9.5. Generation Preservation System
 - Unused generations preserved when upgrading/renewing plans
 - Fair billing system that maintains user value
 - Clear visual feedback for generation limits and usage
 
-### 9.4. Improved User Experience
-- Glowing buttons for urgent actions
+### 9.6. Improved User Experience
+- **Authentication Flow**: Seamless navigation between login, signup, forgot password, and reset forms
+- **Visual Feedback**: Success states with checkmarks, error states with alerts, loading spinners
+- **Mobile Responsiveness**: All authentication forms optimized for mobile devices
+- **Accessibility**: Proper ARIA labels, keyboard navigation, and screen reader support
+- **Glowing buttons for urgent actions**: Enhanced visual cues for critical user actions
 - Loading states throughout the application
 - Responsive design with consistent theming
 

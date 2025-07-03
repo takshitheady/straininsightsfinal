@@ -213,6 +213,128 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 ```
 
+### 4.4. Enhanced Authentication Configuration
+
+#### 4.4.1. Email Templates for Password Reset
+
+**Navigate to**: Supabase Dashboard → Authentication → Email Templates → Recovery
+
+**Update the "Reset Your Password" template with this custom HTML:**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f7f9fc; }
+        .container { max-width: 600px; margin: 30px auto; padding: 25px; background-color: #ffffff; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.15); }
+        .header { text-align: center; padding-bottom: 25px; border-bottom: 1px solid #eee; margin-bottom: 25px; }
+        .header h1 { color: #28a745; margin: 0; font-size: 28px; }
+        .content { padding-bottom: 20px; }
+        .button {
+            display: inline-block;
+            padding: 18px 35px;
+            background-color: #28a745;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 50px;
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 6px 12px rgba(40, 167, 69, 0.4);
+            transition: transform 0.2s ease-in-out;
+        }
+        .button:hover { transform: translateY(-2px); background-color: #218838; }
+        .footer { text-align: center; font-size: 13px; color: #777; margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Reset Account Password!</h1>
+        </div>
+        <div class="content">
+            <p>Hello,</p>
+            <p>A warm welcome from the team at StrainInsights! We're thrilled you've decided to join us!</p>
+            <p>To reset your password and gain full access, please click the secure button below:</p>
+            <p style="text-align: center;">
+                <a href="{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery" class="button">Reset Account Password</a>
+            </p>
+            <p>This confirmation link is valid for 5 minutes. If you encounter any issues, please don't hesitate to reach out at: automation@useheady.com</p>
+            <p>We're excited to see what you create!</p>
+        </div>
+        <div class="footer">
+            <p>Best regards,</p>
+            <p>The StrainInsights Team</p>
+        </div>
+    </div>
+</body>
+</html>
+```
+
+**Key Template Features:**
+- **Responsive Design**: Works across all email clients
+- **StrainInsights Branding**: Custom colors and styling (#28a745)
+- **Token Integration**: Uses `{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery`
+- **Professional Appearance**: Modern design with hover effects
+- **Clear Call-to-Action**: Prominent reset button
+
+#### 4.4.2. URL Configuration for Password Reset
+
+**Navigate to**: Supabase Dashboard → Authentication → URL Configuration
+
+**Configure the following URLs:**
+
+1. **Site URL**: 
+   - **Development**: `http://localhost:5173`
+   - **Production**: `https://yourdomain.com`
+
+2. **Additional Redirect URLs**:
+   - **Development**: 
+     - `http://localhost:5173/reset-password`
+     - `http://localhost:5173/*` (wildcard for development)
+   - **Production**:
+     - `https://yourdomain.com/reset-password`
+     - `https://yourdomain.com/*`
+
+3. **Rate Limiting Configuration**:
+   - Password reset emails: 3 per hour per email address (automatic)
+   - Login attempts: Built-in Supabase rate limiting
+   - Session duration: Configurable in auth settings
+
+#### 4.4.3. Email Provider Configuration (Optional)
+
+**For Production Environments:**
+
+1. **Custom SMTP Setup** (Optional):
+   - Navigate to: Project Settings → Auth → SMTP Settings
+   - Configure custom SMTP for branded email delivery
+   - Use services like SendGrid, Mailgun, or AWS SES
+
+2. **Default Supabase Email Service**:
+   - Suitable for development and small-scale production
+   - Built-in rate limiting and security features
+   - Professional email delivery with good deliverability
+
+#### 4.4.4. Enhanced Security Settings
+
+**Authentication Security Configuration:**
+
+1. **Password Requirements**:
+   - Minimum length: 6 characters (configurable)
+   - Complexity requirements: Can be customized
+   - Password history: Prevent reuse of recent passwords
+
+2. **Session Management**:
+   - Session timeout: Configurable duration
+   - Refresh token rotation: Enhanced security
+   - Multi-device session handling
+
+3. **Email Verification**:
+   - Email confirmation for new accounts
+   - Double opt-in for enhanced security
+   - Custom verification email templates
+
 ## 5. Storage Setup
 
 1.  Navigate to "Storage" in your Supabase dashboard.
@@ -354,11 +476,49 @@ Ensure all redirect URLs point to your production domain:
 
 ## 9. Enhanced Testing Checklist
 
-### 9.1. Authentication Testing
-- [ ] Email/password sign-up and login
-- [ ] Google OAuth sign-up and login
+### 9.1. Authentication System Testing
+
+#### 9.1.1. Basic Authentication
+- [ ] Email/password sign-up with new email
+- [ ] Email/password sign-up with existing email (should show error)
+- [ ] Email/password login with correct credentials
+- [ ] Email/password login with wrong credentials (should show specific error)
 - [ ] User profile creation after authentication
-- [ ] Proper redirect handling after OAuth
+- [ ] Session persistence across browser refresh
+
+#### 9.1.2. Google OAuth Testing
+- [ ] Google OAuth sign-up for new users
+- [ ] Google OAuth login for existing users
+- [ ] Proper redirect handling after OAuth success
+- [ ] OAuth error handling (user cancels, network issues)
+- [ ] Profile creation integration for OAuth users
+
+#### 9.1.3. Error Handling Testing
+- [ ] Invalid email format validation
+- [ ] Weak password validation (less than 6 characters)
+- [ ] Email not confirmed error message
+- [ ] Rate limiting feedback (too many login attempts)
+- [ ] Network error handling during authentication
+- [ ] Clean console logging (no noise for expected errors)
+
+#### 9.1.4. Password Reset System Testing
+- [ ] Password reset request with valid email
+- [ ] Password reset request with invalid email
+- [ ] Email delivery with custom template and branding
+- [ ] Reset link token verification and validation
+- [ ] Password reset with valid token
+- [ ] Password reset with expired/invalid token
+- [ ] Password confirmation matching validation
+- [ ] Auto-redirect after successful password reset
+- [ ] Rate limiting for reset emails (3 per hour)
+
+#### 9.1.5. User Interface Testing
+- [ ] Alert components display errors consistently
+- [ ] Loading states show appropriate spinners
+- [ ] Success states with clear confirmation messages
+- [ ] Navigation between auth forms (login → forgot → reset)
+- [ ] Mobile responsiveness of auth forms
+- [ ] Form validation and real-time feedback
 
 ### 9.2. Subscription Management Testing
 - [ ] Plan selection and Stripe checkout
@@ -386,6 +546,17 @@ Ensure all redirect URLs point to your production domain:
 - [ ] Storage policies protecting user files
 - [ ] Webhook signature verification
 - [ ] Environment variable security
+- [ ] Password reset token security (expiration, single-use)
+- [ ] Session security and automatic refresh
+- [ ] Rate limiting protection for all auth endpoints
+
+### 9.6. Email System Testing
+- [ ] Email template rendering in various clients
+- [ ] Custom branding appears correctly
+- [ ] Reset links work from email clients
+- [ ] Email deliverability to common providers
+- [ ] Unsubscribe handling (if applicable)
+- [ ] SMTP configuration (if using custom provider)
 
 ## 10. Monitoring and Maintenance
 

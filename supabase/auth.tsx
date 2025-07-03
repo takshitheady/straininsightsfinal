@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { User } from "@supabase/supabase-js";
+import { User, AuthError } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 
 type AuthContextType = {
@@ -9,6 +9,8 @@ type AuthContextType = {
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  updatePassword: (newPassword: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,7 +52,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
       
       if (error) {
-        console.error("Supabase auth signUp error:", error);
+        // Only log unexpected errors to console, not user input errors
+        const expectedErrors = ["User already registered", "Email rate limit exceeded"];
+        if (!expectedErrors.includes(error.message)) {
+          console.error("Supabase auth signUp error:", error);
+        }
         throw error;
       }
       
@@ -61,36 +67,115 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       console.log("Signup successful:", data);
     } catch (error) {
-      console.error("Error in signUp function:", error);
+      // Only log unexpected errors to console
+      const expectedErrors = ["User already registered", "Email rate limit exceeded", "This email is already registered. Please log in instead."];
+      if (error instanceof AuthError && !expectedErrors.includes(error.message)) {
+        console.error("Error in signUp function:", error);
+      } else if (!(error instanceof AuthError) && !(error instanceof Error && expectedErrors.includes(error.message))) {
+        console.error("Error in signUp function:", error);
+      }
       throw error;
     }
   };
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) throw error;
+  const signIn = async (email: string, password: string): Promise<void> => {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      
+      if (error) {
+        // Only log unexpected errors to console, not user input errors
+        if (error.message !== "Invalid login credentials") {
+          console.error("Supabase auth signIn error:", error);
+        }
+        throw error;
+      }
+      
+      console.log("Sign in successful:", data);
+    } catch (error) {
+      // Only log unexpected errors to console
+      if (error instanceof AuthError && error.message !== "Invalid login credentials") {
+        console.error("Error in signIn function:", error);
+      }
+      throw error;
+    }
   };
 
-  const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/upload`,
-      },
-    });
-    if (error) throw error;
+  const signInWithGoogle = async (): Promise<void> => {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/upload`,
+        },
+      });
+      
+      if (error) {
+        console.error("Supabase auth signInWithGoogle error:", error);
+        throw error;
+      }
+      
+      console.log("Google sign in initiated:", data);
+    } catch (error) {
+      console.error("Error in signInWithGoogle function:", error);
+      throw error;
+    }
   };
 
-  const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+  const signOut = async (): Promise<void> => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error("Supabase auth signOut error:", error);
+        throw error;
+      }
+      
+      console.log("Sign out successful");
+    } catch (error) {
+      console.error("Error in signOut function:", error);
+      throw error;
+    }
+  };
+
+  const resetPassword = async (email: string): Promise<void> => {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      
+      if (error) {
+        throw error;
+      }
+      
+      console.log("Password reset email sent successfully");
+    } catch (error) {
+      console.error("Error sending password reset email:", error);
+      throw error;
+    }
+  };
+
+  const updatePassword = async (newPassword: string): Promise<void> => {
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      
+      if (error) {
+        console.error("Supabase auth updatePassword error:", error);
+        throw error;
+      }
+      
+      console.log("Password updated successfully:", data);
+    } catch (error) {
+      console.error("Error in updatePassword function:", error);
+      throw error;
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signInWithGoogle, signOut, resetPassword, updatePassword }}>
       {children}
     </AuthContext.Provider>
   );

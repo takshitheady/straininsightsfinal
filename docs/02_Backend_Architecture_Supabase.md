@@ -77,22 +77,146 @@ Stores metadata and results for uploaded Certificates of Analysis (COAs).
 
 *Note: Row Level Security (RLS) policies are crucial for these tables to ensure users can only access and modify their own data.*
 
-## 4. Authentication (Enhanced)
+## 4. Authentication System (Comprehensive)
 
-**Multi-Provider Authentication System:**
+### 4.1. Multi-Provider Authentication
 
--   **Email/Password Authentication**: Traditional authentication flow
--   **Google OAuth**: Seamless Google sign-in integration
+**Supported Authentication Methods:**
+
+-   **Email/Password Authentication**: 
+    -   Traditional authentication flow with enhanced error handling
+    -   Specific error messages for various failure scenarios
+    -   Clean console logging (filters expected user errors)
+    -   Rate limiting protection with user feedback
+
+-   **Google OAuth Integration**: 
+    -   Seamless Google sign-in/sign-up experience
     -   Configured in Supabase Dashboard → Authentication → Providers
     -   Automatic user profile creation on first sign-in
-    -   Redirect to `/upload` after successful authentication
+    -   Consistent branding and redirect handling
+    -   Automatic redirect to `/upload` after successful authentication
 
--   **Session Management**: 
-    -   The `src/supabase/auth.tsx` file provides a React context (`AuthProvider`)
-    -   Manages user sessions and authentication status
-    -   Supports multiple authentication methods through unified interface
+-   **Password Reset System**:
+    -   Email-based password recovery with custom branded templates
+    -   Token-based verification with 5-minute expiration
+    -   Secure password update process
+    -   Rate limiting: 3 reset emails per hour per address
 
--   **Security**: RLS policies in the database are tied to `auth.uid()` to enforce data access rules.
+### 4.2. Enhanced Error Handling
+
+**Comprehensive Error Management:**
+
+-   **Specific Error Messages**: User-friendly messages for all authentication scenarios
+    -   Invalid credentials: "Invalid email or password. Please check your credentials and try again."
+    -   Email not confirmed: "Please check your email and click the confirmation link before signing in."
+    -   Rate limiting: "Too many login attempts. Please wait a moment before trying again."
+    -   Account issues: "Account temporarily locked due to too many failed attempts."
+
+-   **HTTP Status Code Handling**: 
+    -   400: Invalid request parameters
+    -   422: Validation errors (password length, email format)
+    -   429: Rate limiting (too many attempts)
+    -   500: Server errors
+
+-   **Clean Console Logging**: 
+    -   Filters out expected user errors (wrong passwords, etc.)
+    -   Logs only unexpected errors for debugging
+    -   Maintains development-friendly error information
+
+### 4.3. Password Reset Architecture
+
+**Complete Password Reset Flow:**
+
+1. **Request Initiation** (`ForgotPasswordForm.tsx`):
+   - Email validation and submission
+   - Loading states and user feedback
+   - Success confirmation with clear instructions
+
+2. **Email Template System**:
+   - Custom HTML templates with StrainInsights branding
+   - Responsive design for all email clients
+   - Professional styling with company colors (#28a745)
+   - Token-based URLs: `{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery`
+
+3. **Token Verification** (`ResetPasswordForm.tsx`):
+   - URL parameter extraction and validation
+   - Session verification with `supabase.auth.verifyOtp()`
+   - Graceful handling of invalid/expired tokens
+   - Fallback UI for expired links
+
+4. **Password Update Process**:
+   - Secure password validation (minimum 6 characters)
+   - Password confirmation matching
+   - Atomic password update with session management
+   - Auto-redirect to login after successful reset
+
+### 4.4. Authentication Context & State Management
+
+**Enhanced Authentication Context** (`supabase/auth.tsx`):
+
+```typescript
+// Available authentication methods
+const {
+  user,              // Current user session
+  loading,           // Authentication loading state
+  signInWithEmail,   // Email/password login
+  signInWithGoogle,  // Google OAuth login
+  signUp,            // Email/password registration
+  signOut,           // User logout
+  resetPassword,     // Password reset initiation
+  updatePassword     // Secure password update
+} = useAuth();
+```
+
+**Features:**
+-   Centralized session management across the application
+-   Automatic session persistence and refresh
+-   Unified error handling for all authentication methods
+-   Real-time authentication state updates
+-   Protected route integration
+
+### 4.5. Security Implementation
+
+**Multi-Layer Security Approach:**
+
+-   **Token Security**:
+    -   Short-lived reset tokens (5-minute expiration)
+    -   Single-use token validation
+    -   Secure HTTPS-only transmission
+    -   Supabase-handled signature verification
+
+-   **Rate Limiting**:
+    -   Built-in Supabase rate limiting for login attempts
+    -   Email rate limiting: 3 password reset emails per hour per address
+    -   Clear user feedback for rate limit scenarios
+
+-   **Input Validation**:
+    -   Client-side validation for immediate feedback
+    -   Server-side validation through Supabase
+    -   Password strength requirements (configurable)
+    -   RFC-compliant email format validation
+
+-   **Session Management**:
+    -   Secure session cookies with HTTPOnly flags
+    -   Automatic session refresh handling
+    -   Proper session cleanup on logout
+    -   Cross-tab session synchronization
+
+### 4.6. Database Integration
+
+**User Profile Management:**
+
+-   **Automatic Profile Creation**: Trigger function creates user profile on account creation
+-   **OAuth Integration**: Google OAuth users get seamless profile setup
+-   **Session Linking**: Database user records linked to `auth.users` via foreign keys
+-   **RLS Policies**: Row Level Security policies tied to `auth.uid()` for data access control
+
+**Password Reset Tracking:**
+
+-   Password reset events logged for security auditing
+-   Failed reset attempts tracked for abuse prevention
+-   User notification for successful password changes
+-   Integration with user activity logging
 
 ## 5. Storage
 
