@@ -3,6 +3,8 @@ import { useAuth } from "../../../supabase/auth";
 import { supabase } from "../../../supabase/supabase";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
+import { initiateCheckout } from "../../lib/stripeUtils";
+import { useToast } from "../ui/use-toast";
 import {
   User,
   Settings,
@@ -19,6 +21,8 @@ import {
   Check,
   Users,
   Loader2,
+  Crown,
+  Star,
 } from "lucide-react";
 import {
   Card,
@@ -41,6 +45,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Toaster } from "@/components/ui/toaster";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 // Animation Variants
 const fadeIn = {
@@ -76,7 +88,24 @@ const ProfilePage = () => {
   const { user, loading, signOut } = useAuth();
   const [subscription, setSubscription] = useState<UserSubscription | null>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingPlanId, setProcessingPlanId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [showPlanSelector, setShowPlanSelector] = useState(false);
+  const { toast } = useToast();
   
+  // Stripe Price IDs
+  const PRICE_IDS = {
+    basic: "price_1RTkaDDa07Wwp5KNnZF36GsC",
+    pro: "price_1RTka9Da07Wwp5KNiRxFGnsG"
+  };
+
+  // Plan features
+  const PLAN_FEATURES = {
+    basic: ["30 Generations/Month", "1 GB Storage", "Basic Authentication"],
+    pro: ["100 Generations/Month", "2 GB Storage", "Authentication + Latest Improvements", "Community Support"]
+  };
+
   // Format account creation date
   const formatCreationDate = (timestamp: number | string | null) => {
     if (!timestamp) return "Unknown";
@@ -88,6 +117,50 @@ const ProfilePage = () => {
       month: 'long', 
       day: 'numeric'
     });
+  };
+
+  // Handle plan selection
+  const handlePlanSelection = (planType: 'basic' | 'pro') => {
+    if (!user) return;
+    
+    setShowPlanSelector(false);
+    
+    initiateCheckout({
+      priceId: PRICE_IDS[planType],
+      user,
+      supabase,
+      toast,
+      setIsLoading: setIsProcessing,
+      setError,
+      setProcessingPlanId,
+      returnUrlPath: '/profile'
+    });
+  };
+
+  // Handle billing management
+  const handleManageBilling = () => {
+    if (!subscription || !user) return;
+    
+    const currentPlan = subscription.plan_name;
+    
+    if (currentPlan === "Free Plan") {
+      // Free users can choose Basic or Pro
+      setShowPlanSelector(true);
+    } else if (currentPlan === "Basic Plan") {
+      // Basic users can upgrade to Pro or manage current plan
+      setShowPlanSelector(true);
+    } else if (currentPlan === "Pro Plan") {
+      // Pro users can renew Pro or downgrade to Basic
+      setShowPlanSelector(true);
+    } else {
+      // For any other plans, open Stripe Customer Portal (when implemented)
+      console.log("Opening Stripe Customer Portal for paid user");
+      toast({
+        title: "Coming Soon",
+        description: "Customer portal integration is in development.",
+        variant: "default",
+      });
+    }
   };
 
   // Fetch user subscription data
@@ -118,6 +191,8 @@ const ProfilePage = () => {
             planName = "Pro Plan";
         } else if (currentPlanId === 'basic') { // Add other plan IDs as needed
             planName = "Basic Plan";
+        } else if (currentPlanId === 'free') {
+            planName = "Free Plan";
         } else if (currentPlanId) {
             // Handle potential unknown plan IDs if necessary
             planName = currentPlanId; // Or "Unknown Plan"
@@ -128,8 +203,8 @@ const ProfilePage = () => {
         let subscriptionStatus = "active"; // Default status
         let currentPeriodEnd = undefined;
 
-        // 2. Fetch Subscription Status (if user has a plan - assuming free plan has no subscription record)
-        if (currentPlanId) { // Only check for subscription if not on the default free plan
+        // 2. Fetch Subscription Status (only for paid plans, not free plan)
+        if (currentPlanId && currentPlanId !== 'free') { // Only check for subscription if NOT on free plan
             const { data: subscriptionData, error: subscriptionError } = await supabase
                 .from('subscriptions')
                 .select('status, current_period_end') // Fetch status and end date
@@ -139,7 +214,7 @@ const ProfilePage = () => {
 
            if (subscriptionError) {
                console.warn(`Could not fetch subscription status: ${subscriptionError.message}. Assuming 'active'.`);
-               // Keep default 'active' status if fetch fails, or maybe 'inactive'?
+               // Keep default 'active' status if fetch fails
            } else if (subscriptionData) {
                subscriptionStatus = subscriptionData.status || 'inactive'; // Use fetched status
                 if (subscriptionData.current_period_end) {
@@ -147,12 +222,12 @@ const ProfilePage = () => {
                    currentPeriodEnd = new Date(subscriptionData.current_period_end * 1000).toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric'});
                 }
            } else {
-                // No subscription record found for this user (could be error, cancelled, or just ended)
-                subscriptionStatus = 'inactive'; // Assume inactive if no record found for a non-free plan ID
+                // No subscription record found for paid plan - this means cancelled or expired
+                subscriptionStatus = 'inactive';
            }
         } else {
-            // User is on free plan, status is effectively 'active' (or n/a)
-            subscriptionStatus = 'active'; // Or you could use a different term like 'N/A'
+            // User is on free plan, status should be 'inactive' to encourage upgrades
+            subscriptionStatus = 'inactive';
         }
 
 
@@ -181,6 +256,141 @@ const ProfilePage = () => {
 
     fetchSubscriptionData();
   }, [user]); // Dependency array
+
+  // Plan Selector Dialog Component
+  const PlanSelectorDialog = () => {
+    if (!subscription) return null;
+    
+    const currentPlan = subscription.plan_name;
+    const isBasicUser = currentPlan === "Basic Plan";
+    const isProUser = currentPlan === "Pro Plan";
+    const isFreeUser = currentPlan === "Free Plan";
+
+    return (
+      <Dialog open={showPlanSelector} onOpenChange={setShowPlanSelector}>
+        <DialogContent className="bg-gray-900 border-gray-700 text-white max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-white">
+              {isFreeUser && "Choose Your Plan"}
+              {isBasicUser && "Manage Your Plan"}
+              {isProUser && "Manage Your Plan"}
+            </DialogTitle>
+            <DialogDescription className="text-gray-400">
+              {isFreeUser && "Select a plan to unlock more features and increase your generation limits."}
+              {isBasicUser && "Renew your current Basic plan or upgrade to Pro for enhanced features."}
+              {isProUser && "Renew your Pro plan or switch to Basic if needed."}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+            {/* Basic Plan Card */}
+            {(isFreeUser || isBasicUser || isProUser) && (
+              <Card className={`bg-white/5 border ${isBasicUser ? 'border-blue-400/50' : 'border-white/10'} hover:border-white/20 transition-colors ${isBasicUser ? 'relative' : ''}`}>
+                {isBasicUser && (
+                  <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                    <Badge className="bg-blue-600 text-white font-semibold px-3 py-1">
+                      Current Plan
+                    </Badge>
+                  </div>
+                )}
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg font-semibold text-white flex items-center">
+                      <Shield className="h-5 w-5 mr-2 text-blue-400" />
+                      Basic Plan
+                    </CardTitle>
+                  </div>
+                  <div className="mt-2">
+                    <span className="text-3xl font-bold text-white">$39</span>
+                    <span className="text-gray-400 ml-1">/month</span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-3">
+                    {PLAN_FEATURES.basic.map((feature, index) => (
+                      <li key={index} className="flex items-start text-sm text-gray-300">
+                        <Check className="h-4 w-4 mr-2.5 flex-shrink-0 mt-0.5 text-green-400" />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+                <CardFooter>
+                  <Button
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={() => handlePlanSelection('basic')}
+                    disabled={isProcessing}
+                  >
+                    {isProcessing && processingPlanId === PRICE_IDS.basic ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      isBasicUser ? "Renew Basic Plan" :
+                      isProUser ? "Switch to Basic" : "Choose Basic"
+                    )}
+                  </Button>
+                </CardFooter>
+              </Card>
+            )}
+
+            {/* Pro Plan Card */}
+            <Card className="bg-white/5 border border-brand-green/50 hover:border-brand-green transition-colors relative">
+              {!isProUser && (
+                <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                  <Badge className="bg-brand-green text-black font-semibold px-3 py-1">
+                    <Star className="h-3 w-3 mr-1" />
+                    RECOMMENDED
+                  </Badge>
+                </div>
+              )}
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg font-semibold text-white flex items-center">
+                    <Crown className="h-5 w-5 mr-2 text-brand-green" />
+                    Pro Plan
+                  </CardTitle>
+                  {isProUser && <Badge className="bg-brand-green text-black">Current</Badge>}
+                </div>
+                <div className="mt-2">
+                  <span className="text-3xl font-bold text-white">$99</span>
+                  <span className="text-gray-400 ml-1">/month</span>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-3">
+                  {PLAN_FEATURES.pro.map((feature, index) => (
+                    <li key={index} className="flex items-start text-sm text-gray-300">
+                      <Check className="h-4 w-4 mr-2.5 flex-shrink-0 mt-0.5 text-brand-green" />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+              <CardFooter>
+                <Button
+                  className="w-full bg-brand-green hover:bg-green-600 text-black font-semibold"
+                  onClick={() => handlePlanSelection('pro')}
+                  disabled={isProcessing}
+                >
+                  {isProcessing && processingPlanId === PRICE_IDS.pro ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    isProUser ? "Renew Pro Plan" : 
+                    isBasicUser ? "Upgrade to Pro" : "Choose Pro"
+                  )}
+                </Button>
+              </CardFooter>
+            </Card>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-brand-dark text-gray-200 font-sans">
@@ -356,10 +566,24 @@ const ProfilePage = () => {
                      <CardFooter className="bg-white/5 border-t border-white/10 px-6 py-4">
                         <Button
                            variant="outline"
-                           className="w-full text-brand-green border-brand-green/50 hover:bg-brand-green/10 hover:text-brand-green hover:border-brand-green"
-                            onClick={() => console.log("Manage Billing Clicked")} // Add manage billing portal logic here
+                           className={`w-full text-brand-green border-brand-green/50 hover:bg-brand-green/10 hover:text-brand-green ${
+                             subscription && subscription.operations_used >= subscription.operations_limit 
+                               ? 'animate-pulse ring-2 ring-brand-green/50 bg-brand-green/10 shadow-lg shadow-brand-green/25' 
+                               : ''
+                           }`}
+                            onClick={handleManageBilling}
+                            disabled={isProcessing}
                          >
-                            Manage Billing
+                            {isProcessing ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Processing...
+                              </>
+                            ) : (
+                              subscription && subscription.operations_used >= subscription.operations_limit 
+                                ? "Upgrade Plan - No Generations Left!" 
+                                : "Manage Billing"
+                            )}
                           </Button>
                       </CardFooter>
                   </Card>
@@ -384,9 +608,11 @@ const ProfilePage = () => {
                          <Button variant="ghost" className="justify-start text-gray-300 hover:text-white hover:bg-white/10">
                               <Edit className="h-4 w-4 mr-2"/> Edit Profile (Coming Soon)
                           </Button>
-                          <Button variant="ghost" className="justify-start text-gray-300 hover:text-white hover:bg-white/10">
-                              <History className="h-4 w-4 mr-2"/> View Generation History
-                          </Button>
+                          <Link to="/output-history">
+                            <Button variant="ghost" className="justify-start text-gray-300 hover:text-white hover:bg-white/10 w-full">
+                                <History className="h-4 w-4 mr-2"/> View Generation History
+                            </Button>
+                          </Link>
                           <Separator className="bg-white/10 my-2" />
                          <Button variant="ghost" className="justify-start text-red-400 hover:text-red-300 hover:bg-red-900/20" onClick={() => signOut()}>
                               <LogOut className="h-4 w-4 mr-2"/> Log Out
@@ -408,7 +634,8 @@ const ProfilePage = () => {
         </motion.div> {/* <<< Closing motion.div */} 
       </main> 
       <Toaster /> 
-    </div> /* <<< Closing main component div */ 
+      <PlanSelectorDialog />
+    </div> 
   ); 
 }; 
  

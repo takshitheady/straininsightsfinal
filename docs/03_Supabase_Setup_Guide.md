@@ -1,43 +1,66 @@
-# Supabase Setup Guide for StrainInsights
+# Supabase Setup Guide for StrainInsights (Enhanced)
 
-This guide walks through the steps to set up a Supabase project similar to the one used by the StrainInsights application.
+This guide walks through the steps to set up a Supabase project similar to the one used by the StrainInsights application, including enhanced features like Google OAuth, generation preservation, and sophisticated subscription management.
 
 ## 1. Prerequisites
 
 -   A Supabase account ([supabase.com](https://supabase.com))
 -   Supabase CLI installed and configured ([Supabase CLI Docs](https://supabase.com/docs/guides/cli))
--   Node.js and npm (or yarn) for frontend development.
--   A Stripe account for payment processing.
--   (Optional) An account with an AI/LLM provider (e.g., OpenAI) if you intend to replicate the COA processing logic.
+-   Node.js and npm (or yarn) for frontend development
+-   A Stripe account for payment processing
+-   A Google Cloud Console account for OAuth setup
+-   (Optional) An account with an AI/LLM provider (e.g., OpenAI) for COA processing logic
 
 ## 2. Create a New Supabase Project
 
 1.  Go to your Supabase dashboard.
 2.  Click "New project".
-3.  Choose your organization, provide a project name (e.g., `straininsights-clone`), generate a strong database password (and save it securely), and select a region.
+3.  Choose your organization, provide a project name (e.g., `straininsights-production`), generate a strong database password (and save it securely), and select a region.
 4.  Wait for the project to be provisioned.
 
-## 3. Database Schema Setup
+## 3. Enhanced Database Schema Setup
 
-Once the project is ready, navigate to the "Table Editor" in your Supabase dashboard or use SQL migrations with the Supabase CLI.
+Navigate to the "Table Editor" in your Supabase dashboard or use SQL migrations with the Supabase CLI.
 
-### 3.1. `users` Table
+### 3.1. Enhanced `users` Table
 
-This table complements the built-in `auth.users` table.
+This table complements the built-in `auth.users` table with enhanced subscription management.
 
 -   **Name**: `users`
 -   **Columns**:
-    -   `user_id`: Type `uuid`. Set as Primary Key. Set as Foreign Key to `auth.users.id` with `ON UPDATE CASCADE` and `ON DELETE CASCADE` actions.
+    -   `id`: Type `uuid`. Set as Primary Key. Set as Foreign Key to `auth.users.id` with `ON UPDATE CASCADE` and `ON DELETE CASCADE` actions.
     -   `email`: Type `text`. Can be nullable if you don't always duplicate it from `auth.users`.
     -   `stripe_customer_id`: Type `text`. Nullable.
-    -   `current_plan_id`: Type `text`. Nullable. (This would be a **live** Stripe Price ID in production, e.g., `price_1RTkaDDa07Wwp5KNnZF36GsC`).
-    -   `subscription_status`: Type `text`. Nullable.
+    -   `current_plan_id`: Type `text`. Default value `'free'`. Values: `'free'`, `'basic'`, `'pro'`.
+    -   `subscription_status`: Type `text`. Nullable. Values: `'active'`, `'canceled'`, `'past_due'`, `'trialing'`.
     -   `generations_used`: Type `int4` (integer). Default value `0`.
-    -   `generation_limit`: Type `int4` (integer). Default value (e.g., `10` for a free tier, or a higher value if you have default paid plans).
+    -   `generation_limit`: Type `int4` (integer). Default value `10` (free tier).
     -   `created_at`: Type `timestamptz`. Default value `now()`.
     -   `updated_at`: Type `timestamptz`. Default value `now()`.
 
-### 3.2. `lab_results` Table
+**Enhanced Features:**
+- Plan-based generation limits: Free (10), Basic (30), Pro (100)
+- Generation preservation across plan changes
+- Smart account status management
+
+### 3.2. New `subscriptions` Table
+
+Detailed subscription tracking for enhanced billing management.
+
+-   **Name**: `subscriptions`
+-   **Columns**:
+    -   `id`: Type `uuid`. Set as Primary Key. Default value `gen_random_uuid()`.
+    -   `user_id`: Type `uuid`. Set as Foreign Key to `users.id` with `ON UPDATE CASCADE` and `ON DELETE CASCADE`.
+    -   `stripe_subscription_id`: Type `text`. Unique constraint.
+    -   `stripe_customer_id`: Type `text`.
+    -   `status`: Type `text`. Current subscription status from Stripe.
+    -   `current_period_start`: Type `timestamptz`. Start of current billing period.
+    -   `current_period_end`: Type `timestamptz`. End of current billing period.
+    -   `plan_id`: Type `text`. Associated plan identifier.
+    -   `created_at`: Type `timestamptz`. Default value `now()`.
+    -   `updated_at`: Type `timestamptz`. Default value `now()`.
+
+### 3.3. `lab_results` Table (Unchanged)
 
 -   **Name**: `lab_results`
 -   **Columns**:
@@ -51,138 +74,331 @@ This table complements the built-in `auth.users` table.
     -   `created_at`: Type `timestamptz`. Default value `now()`.
     -   `updated_at`: Type `timestamptz`. Default value `now()`.
 
-### 3.3. Row Level Security (RLS)
+### 3.4. Enhanced SQL Functions
 
-RLS is critical for protecting user data. Enable RLS for both `users` and `lab_results` tables.
+Create a function for atomic plan updates with generation preservation:
 
-**Example RLS Policy for `users` table (Allow users to manage their own profile):**
+```sql
+CREATE OR REPLACE FUNCTION update_user_plan(
+  p_user_id UUID,
+  p_plan_id TEXT,
+  p_generation_limit INTEGER,
+  p_preserve_generations BOOLEAN DEFAULT TRUE
+)
+RETURNS VOID AS $$
+DECLARE
+  current_used INTEGER;
+  current_limit INTEGER;
+  unused_generations INTEGER;
+  new_generation_limit INTEGER;
+  new_generations_used INTEGER;
+BEGIN
+  -- Get current usage data
+  SELECT generations_used, generation_limit 
+  INTO current_used, current_limit
+  FROM users 
+  WHERE id = p_user_id;
+  
+  -- Calculate unused generations if preservation is enabled
+  IF p_preserve_generations AND current_used < current_limit THEN
+    unused_generations := current_limit - current_used;
+    new_generation_limit := p_generation_limit + unused_generations;
+    new_generations_used := unused_generations;
+  ELSE
+    new_generation_limit := p_generation_limit;
+    new_generations_used := 0;
+  END IF;
+  
+  -- Update user plan atomically
+  UPDATE users 
+  SET 
+    current_plan_id = p_plan_id,
+    generation_limit = new_generation_limit,
+    generations_used = new_generations_used,
+    updated_at = NOW()
+  WHERE id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;
+```
 
--   **Policy Name**: `Allow individual user access to their own data`
--   **Target Roles**: `authenticated`
--   **Command**: `ALL` (or select specific ones like `SELECT`, `UPDATE`)
--   **USING expression**: `auth.uid() = user_id`
--   **WITH CHECK expression**: `auth.uid() = user_id`
+### 3.5. Enhanced Row Level Security (RLS)
 
-**Example RLS Policies for `lab_results` table (Allow users to manage their own lab results):**
+Enable RLS for all tables with proper policies:
 
--   **Policy Name**: `Allow individual user CRUD on their lab_results`
--   **Target Roles**: `authenticated`
--   **Command**: `ALL`
--   **USING expression**: `auth.uid() = user_id`
--   **WITH CHECK expression**: `auth.uid() = user_id`
+**For `users` table:**
+```sql
+-- Enable RLS
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
-*Note: You might also need a policy to allow service roles (used by Edge Functions) to bypass RLS or have broader access if they need to operate on data across users (e.g., an admin function). However, for user-initiated actions, RLS scoped to `auth.uid()` is standard.* Consider if new users can insert into the `users` table or if that's handled by a trigger/function after sign-up.
+-- Allow users to read their own profile
+CREATE POLICY "Users can view own profile" ON users
+  FOR SELECT USING (auth.uid() = id);
 
-## 4. Authentication Setup
+-- Allow users to update their own profile
+CREATE POLICY "Users can update own profile" ON users
+  FOR UPDATE USING (auth.uid() = id);
 
+-- Allow new user creation (for triggers)
+CREATE POLICY "Allow user creation" ON users
+  FOR INSERT WITH CHECK (auth.uid() = id);
+```
+
+**For `subscriptions` table:**
+```sql
+-- Enable RLS
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+
+-- Allow users to view their own subscriptions
+CREATE POLICY "Users can view own subscriptions" ON subscriptions
+  FOR SELECT USING (auth.uid() = user_id);
+```
+
+**For `lab_results` table:**
+```sql
+-- Enable RLS
+ALTER TABLE lab_results ENABLE ROW LEVEL SECURITY;
+
+-- Allow users full access to their own lab results
+CREATE POLICY "Users can manage own lab results" ON lab_results
+  FOR ALL USING (auth.uid() = user_id);
+```
+
+## 4. Enhanced Authentication Setup
+
+### 4.1. Email/Password Authentication
 -   Navigate to "Authentication" -> "Providers" in your Supabase dashboard.
--   Email/Password provider is enabled by default. Configure other providers if needed.
--   Under "Authentication" -> "Settings", you can configure email templates, redirect URLs, etc.
-    -   **Site URL**: Set this to your frontend deployment URL (e.g., `http://localhost:5174` for local dev, or your **production URL** for live).
-    -   **Additional Redirect URLs**: Add any other URLs your app might redirect to after authentication, ensuring production URLs are used for the live environment.
+-   Email/Password provider is enabled by default.
+
+### 4.2. Google OAuth Setup
+
+**Step 1: Google Cloud Console Configuration**
+1.  Go to [Google Cloud Console](https://console.cloud.google.com/)
+2.  Create a new project or select existing one
+3.  Enable the Google+ API
+4.  Go to "Credentials" -> "Create Credentials" -> "OAuth 2.0 Client IDs"
+5.  Configure OAuth consent screen with your app information
+6.  Create OAuth 2.0 credentials:
+    -   Application type: Web application
+    -   Authorized redirect URIs: `https://<your-project-id>.supabase.co/auth/v1/callback`
+7.  Note your Client ID and Client Secret
+
+**Step 2: Supabase Google Provider Configuration**
+1.  In Supabase Dashboard -> "Authentication" -> "Providers"
+2.  Enable Google provider
+3.  Add your Google OAuth credentials:
+    -   Client ID: From Google Cloud Console
+    -   Client Secret: From Google Cloud Console
+4.  Configure redirect URLs in "Authentication" -> "Settings":
+    -   **Site URL**: Your production frontend URL (e.g., `https://yourdomain.com`)
+    -   **Additional Redirect URLs**: Include development URLs if needed
+
+### 4.3. User Profile Creation Trigger
+
+Create a trigger to automatically create user profiles:
+
+```sql
+-- Function to create user profile
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.users (id, email, current_plan_id, generation_limit, generations_used)
+  VALUES (NEW.id, NEW.email, 'free', 10, 0);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger for new user creation
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+```
 
 ## 5. Storage Setup
 
 1.  Navigate to "Storage" in your Supabase dashboard.
 2.  Click "New bucket".
 3.  **Bucket name**: `labresults`.
-4.  **Public bucket**: Decide if the bucket should be public. For user-uploaded COAs, it's generally better to keep it private and control access via Storage Policies.
-5.  **Configure Storage Policies** for the `labresults` bucket.
-    Example Policies:
-    -   **Allow authenticated users to upload their own files:**
-        -   `Allowed operations`: `insert`
-        -   `Target roles`: `authenticated`
-        -   `Policy definition` (SQL): `bucket_id = 'labresults' AND auth.uid()::text = (storage.foldername(name))[1]` (This policy assumes files are stored in a folder named after the user's ID, e.g., `<user_id>/file.pdf`)
-    -   **Allow authenticated users to read their own files:**
-        -   `Allowed operations`: `select`
-        -   `Target roles`: `authenticated`
-        -   `Policy definition` (SQL): `bucket_id = 'labresults' AND auth.uid()::text = (storage.foldername(name))[1]`
-    -   *Adjust these policies based on your exact file path structure and security needs.* If Edge Functions need to access these files using a service role key, they usually bypass these user-level policies.
+4.  **Public bucket**: Keep private for security.
+5.  **Configure Storage Policies** for the `labresults` bucket:
 
-## 6. Edge Functions Setup
+```sql
+-- Allow authenticated users to upload their own files
+CREATE POLICY "Users can upload own files" ON storage.objects
+  FOR INSERT WITH CHECK (
+    bucket_id = 'labresults' AND 
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
 
-1.  **Initialize Supabase locally** (if not already done for your project clone):
-    ```bash
-    supabase init
-    ```
-2.  **Link your local project to your Supabase project**:
-    ```bash
-    supabase login
-    supabase link --project-ref <YOUR_PROJECT_ID>
-    ```
-    Replace `<YOUR_PROJECT_ID>` with your actual Supabase project ID (from project settings).
-3.  **Create Edge Functions**: The functions (`supabase-functions-get-plans`, `create-checkout`, `process-lab-result`, `payments-webhook`, etc.) are located in the `supabase/functions/` directory. Each function is typically in its own sub-directory with an `index.ts` file.
+-- Allow authenticated users to read their own files
+CREATE POLICY "Users can read own files" ON storage.objects
+  FOR SELECT USING (
+    bucket_id = 'labresults' AND 
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+```
 
-    Example structure:
-    ```
-    supabase/
-      functions/
-        supabase-functions-get-plans/
-          index.ts
-        process-lab-result/
-          index.ts
-        ...
-    ```
+## 6. Enhanced Edge Functions Setup
 
-4.  **Environment Variables for Functions**:
-    -   Go to "Project Settings" -> "Functions" in your Supabase dashboard.
-    -   Add necessary environment variables (secrets) that your Edge Functions will use. **For a live/production environment, ensure you use your LIVE Stripe keys.**
-        -   `STRIPE_SECRET_KEY`: Your **live** Stripe secret key (e.g., `sk_live_...`).
-        -   `STRIPE_WEBHOOK_SECRET`: Your **live** Stripe webhook signing secret (obtained when creating the live webhook endpoint in Stripe).
-        -   `OPENAI_API_KEY` (or similar): API key for your AI service.
-        -   The Supabase URL and Anon Key are usually available by default to functions, but for some operations (like using the admin client), you might need `SUPABASE_SERVICE_ROLE_KEY`.
+### 6.1. Function Structure
+```
+supabase/
+  functions/
+    get-plans/
+      index.ts
+    create-checkout/
+      index.ts
+    process-lab-result/
+      index.ts
+    process-lab-result-long/
+      index.ts
+    payments-webhook/
+      index.ts
+```
 
-5.  **Deploy Functions**:
-    ```bash
-    supabase functions deploy <function_name>
-    ```
-    Or deploy all functions:
-    ```bash
-    supabase functions deploy
-    ```
-    *Ensure Deno is installed if you are testing functions locally or if your CLI version requires it explicitly.*
+### 6.2. Environment Variables for Functions
 
-## 7. Stripe Setup
+**Critical: Use LIVE keys for production**
 
-**Important Note for Live Environment**: When transitioning from a test/sandbox environment to a live production environment, all Stripe entities (Products, Prices, API Keys, Webhook Endpoints) must be recreated or switched to their live mode equivalents within your Stripe dashboard. Live entities will have different IDs than their test counterparts.
+Navigate to "Project Settings" -> "Functions" in your Supabase dashboard and add:
 
-1.  **Create Products and Prices in Stripe (Live Mode)**:
-    -   Log in to your **live** Stripe Dashboard.
-    -   Go to "Products" and create products for your plans (e.g., "Basic Plan", "Premium Plan").
-    -   For each product, create one or more prices (e.g., a monthly recurring price). Note the **live Price IDs** (e.g., `price_live_xxxxxxxxxxxx`). These live IDs are used by your application (`current_plan_id` in `users` table, and for checkout). If you use a frontend mapping for plan names (like `planNames`), ensure it uses these live Price IDs.
-    -   When creating prices or products, you can configure if they are eligible for promotion codes under their respective settings in the Stripe dashboard if you intend to use coupons.
-2.  **API Keys (Live Mode)**: Get your **live** Stripe API keys (Publishable Key for frontend, Secret Key for backend/Edge Functions) from the Stripe Dashboard under "Developers" -> "API keys".
-3.  **Webhook Endpoint (Live Mode)**: For the `payments-webhook` Edge Function:
-    -   In your Supabase dashboard, get the URL for your deployed `payments-webhook` function (this URL is usually static, like `https://<YOUR_PROJECT_ID>.supabase.co/functions/v1/payments-webhook`).
-    -   In your **live** Stripe Dashboard, go to "Developers" -> "Webhooks".
-    -   Click "Add endpoint". **You must create a new endpoint for live mode; you cannot reuse a sandbox endpoint.**
-    -   Paste the Edge Function URL as the "Endpoint URL".
-    -   Select the events to listen for (e.g., `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`).
-    -   Note the **Signing secret** for this **live** webhook endpoint. You'll set this as `STRIPE_WEBHOOK_SECRET` (the live version) in your Supabase function settings.
+-   `STRIPE_SECRET_KEY`: Your **live** Stripe secret key (`sk_live_...`)
+-   `STRIPE_WEBHOOK_SECRET`: Your **live** Stripe webhook signing secret
+-   `OPENAI_API_KEY`: API key for AI service
+-   `SUPABASE_SERVICE_ROLE_KEY`: For admin operations (auto-configured)
 
-## 8. Frontend Configuration
+### 6.3. Deploy Functions
+```bash
+# Link to your project
+supabase link --project-ref <YOUR_PROJECT_ID>
 
-1.  **Install Dependencies**:
-    ```bash
-    npm install # or yarn install
-    ```
-2.  **Environment Variables for Frontend (Live Mode)**:
-    Create a `.env` file (or configure environment variables in your deployment platform) in the root of your frontend project with your Supabase URL, Anon Key, and **live Stripe Publishable Key**:
-    ```
-    VITE_SUPABASE_URL=https://<YOUR_PROJECT_ID>.supabase.co
-    VITE_SUPABASE_ANON_KEY=<YOUR_SUPABASE_ANON_KEY>
-    VITE_STRIPE_PUBLISHABLE_KEY=<YOUR_LIVE_STRIPE_PUBLISHABLE_KEY> # e.g., pk_live_...
-    ```
-    Replace placeholders with your actual Supabase project URL, Anon Key (from Project Settings -> API in your Supabase dashboard), and your live Stripe Publishable Key.
-3.  **Update Supabase Client**: Ensure `src/supabase/supabase.ts` is correctly initialized with these environment variables.
-4.  **Production Redirect URLs**: Ensure that the `return_url` used when creating Stripe checkout sessions (typically in `home.tsx` or `stripeUtils.ts`) points to your production domain (e.g., `https://yourdomain.com/profile`).
+# Deploy all functions
+supabase functions deploy
 
-## 9. Testing
+# Or deploy individual functions
+supabase functions deploy get-plans
+supabase functions deploy create-checkout
+supabase functions deploy payments-webhook
+```
 
--   Test user sign-up and login.
--   Test file uploads and check if records are created in `lab_results` and files appear in Storage.
--   Test the Stripe checkout flow (use Stripe's test card numbers).
--   Verify that webhooks are correctly updating the `users` table in Supabase after subscription changes.
--   Check browser console and Supabase function logs for errors.
+## 7. Enhanced Stripe Setup (Live Mode)
 
-This guide provides a comprehensive overview of setting up Supabase for an application like StrainInsights. Remember to consult the official Supabase and Stripe documentation for more detailed information on specific features and configurations. 
+**Critical: All setup must be done in LIVE mode for production**
+
+### 7.1. Create Products and Prices
+
+**Basic Plan:**
+1.  Create Product: "Basic Plan"
+2.  Create Price: $39.00/month recurring
+3.  Note the live Price ID: `price_1RTkaDDa07Wwp5KNnZF36GsC`
+
+**Pro Plan:**
+1.  Create Product: "Pro Plan"  
+2.  Create Price: $99.00/month recurring
+3.  Note the live Price ID: `price_1RTka9Da07Wwp5KNiRxFGnsG`
+
+### 7.2. API Keys (Live Mode)
+Get your **live** Stripe API keys from "Developers" -> "API keys":
+-   **Publishable Key**: `pk_live_...` (for frontend)
+-   **Secret Key**: `sk_live_...` (for backend/Edge Functions)
+
+### 7.3. Webhook Endpoint (Live Mode)
+
+**Critical: Create NEW webhook endpoint for live mode**
+
+1.  Get your deployed `payments-webhook` function URL:
+    `https://<YOUR_PROJECT_ID>.supabase.co/functions/v1/payments-webhook`
+
+2.  In **live** Stripe Dashboard -> "Developers" -> "Webhooks":
+    -   Click "Add endpoint"
+    -   Endpoint URL: Your function URL
+    -   Events to send:
+        - `checkout.session.completed`
+        - `customer.subscription.created`
+        - `customer.subscription.updated`
+        - `customer.subscription.deleted`
+        - `invoice.payment_succeeded`
+        - `invoice.payment_failed`
+
+3.  Note the **live** Signing Secret for `STRIPE_WEBHOOK_SECRET`
+
+## 8. Enhanced Frontend Configuration
+
+### 8.1. Environment Variables (Live Mode)
+
+Create `.env` file with **live** credentials:
+
+```env
+VITE_SUPABASE_URL=https://<YOUR_PROJECT_ID>.supabase.co
+VITE_SUPABASE_ANON_KEY=<YOUR_SUPABASE_ANON_KEY>
+VITE_STRIPE_PUBLISHABLE_KEY=<YOUR_LIVE_STRIPE_PUBLISHABLE_KEY>
+```
+
+### 8.2. Price ID Configuration
+
+Update your frontend code with live Price IDs:
+
+```typescript
+// In your pricing configuration
+const LIVE_PRICE_IDS = {
+  basic: 'price_1RTkaDDa07Wwp5KNnZF36GsC',
+  pro: 'price_1RTka9Da07Wwp5KNiRxFGnsG'
+};
+```
+
+### 8.3. Production URLs
+
+Ensure all redirect URLs point to your production domain:
+-   Stripe checkout success/cancel URLs
+-   Google OAuth redirect URIs
+-   Supabase site URL and additional redirect URLs
+
+## 9. Enhanced Testing Checklist
+
+### 9.1. Authentication Testing
+- [ ] Email/password sign-up and login
+- [ ] Google OAuth sign-up and login
+- [ ] User profile creation after authentication
+- [ ] Proper redirect handling after OAuth
+
+### 9.2. Subscription Management Testing
+- [ ] Plan selection and Stripe checkout
+- [ ] Webhook processing for new subscriptions
+- [ ] Generation preservation during upgrades
+- [ ] Plan renewals with generation preservation
+- [ ] Account status updates
+
+### 9.3. Generation System Testing
+- [ ] Free tier generation limits (10)
+- [ ] Basic plan generation limits (30)
+- [ ] Pro plan generation limits (100)
+- [ ] Generation preservation examples:
+  - Basic (29/30 used) → Pro upgrade = 101 total
+  - Basic (25/30 used) → Basic renewal = 35 total
+
+### 9.4. UI/UX Testing
+- [ ] Glowing button when generations exhausted
+- [ ] Plan selection dialog functionality
+- [ ] Profile page billing management
+- [ ] Navigation to generation history
+
+### 9.5. Security Testing
+- [ ] RLS policies working correctly
+- [ ] Storage policies protecting user files
+- [ ] Webhook signature verification
+- [ ] Environment variable security
+
+## 10. Monitoring and Maintenance
+
+### 10.1. Set Up Monitoring
+-   Monitor Supabase function logs for errors
+-   Set up Stripe webhook monitoring
+-   Track user subscription metrics
+-   Monitor generation usage patterns
+
+### 10.2. Regular Maintenance
+-   Review and rotate API keys periodically
+-   Monitor database performance
+-   Update dependencies and security patches
+-   Review and optimize RLS policies
+
+This enhanced setup guide provides a comprehensive foundation for deploying a production-ready StrainInsights application with sophisticated subscription management, generation preservation, and excellent user experience features. 

@@ -373,14 +373,37 @@ async function handleCheckoutSessionCompleted(supabaseClient: any, event: any) {
         // Log before update attempt
         console.log(`Preparing to update user ${userToUpdate.id}: set current_plan_id='${planNameForUser}', generation_limit=${generationLimit}`);
 
+        // Get current user data to preserve unused generations
+        const { data: currentUserData } = await supabaseClient
+          .from('users')
+          .select('current_plan_id, generation_limit, generations_used')
+          .eq('id', userToUpdate.id)
+          .single();
+
+        let newGenerationLimit = generationLimit;
+        let newGenerationsUsed = 0;
+
+        // If user has existing data, calculate remaining generations
+        if (currentUserData) {
+          const remainingGenerations = Math.max(0, currentUserData.generation_limit - currentUserData.generations_used);
+          
+          console.log(`User ${userToUpdate.id} current usage: ${currentUserData.generations_used}/${currentUserData.generation_limit}, remaining: ${remainingGenerations}`);
+          
+          // Add remaining generations to new plan limit
+          if (remainingGenerations > 0) {
+            newGenerationLimit = generationLimit + remainingGenerations;
+            console.log(`Adding ${remainingGenerations} remaining generations to new limit. New limit: ${newGenerationLimit}`);
+          }
+        }
+
         // Update the user record
         try {
           const userUpdateResult = await supabaseClient
             .from('users')
             .update({
               current_plan_id: planNameForUser, // Set the plan name ('basic', 'pro', 'free')
-              generation_limit: generationLimit,
-              generations_used: 0, // Reset usage on plan change
+              generation_limit: newGenerationLimit, // New limit + remaining generations
+              generations_used: newGenerationsUsed, // Reset usage counter
               updated_at: new Date().toISOString()
             })
             .eq('id', userToUpdate.id); // Match on the UUID primary key
@@ -397,7 +420,7 @@ async function handleCheckoutSessionCompleted(supabaseClient: any, event: any) {
                 {
                   user_id_param: userToUpdate.id,
                   plan_id_param: planNameForUser, // Pass the determined plan name
-                  limit_param: generationLimit
+                  limit_param: newGenerationLimit // Use the calculated limit with remaining generations
                 }
               );
 

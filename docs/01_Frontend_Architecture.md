@@ -20,7 +20,7 @@ The frontend is a single-page application (SPA) built using **React** and **Vite
 ## 3. Project Structure (Key Directories in `src/`)
 
 -   `components/`: Contains reusable UI components.
-    -   `auth/`: Authentication-related components (LoginForm, SignUpForm).
+    -   `auth/`: Authentication-related components (LoginForm, SignUpForm) with Google OAuth support.
     -   `dashboard/`: Components specific to user dashboards (e.g., `ActivityFeed.tsx`).
     -   `home/`: Components for the landing/home page (e.g., `PricingSection.tsx`).
     -   `pages/`: Top-level page components that correspond to routes (e.g., `home.tsx`, `Upload.tsx`, `Profile.tsx`).
@@ -64,12 +64,54 @@ A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that re
 
 ### 7.1. Authentication
 
--   Users can sign up or log in using email and password.
--   Supabase handles the authentication flow.
--   The `useAuth` hook provides user session information and methods like `signInWithEmail`, `signUp`, and `signOut`.
--   Authenticated users are redirected to protected routes. Unauthenticated users attempting to access protected routes or specific CTAs (e.g., "Upload your PDF", "Choose Plan") are redirected to the login page, often with a redirect query parameter to return them to their original destination after successful login.
+**Enhanced Authentication System with Google OAuth:**
 
-### 7.2. Viewing Pricing Plans
+-   **Email/Password Authentication**: Traditional sign-up and login using email and password.
+-   **Google OAuth Integration**: 
+    -   Users can sign up or log in using their Google accounts
+    -   Implemented in both `LoginForm.tsx` and `SignUpForm.tsx`
+    -   Features official Google branding and consistent UI/UX
+    -   Includes loading states and comprehensive error handling
+    -   Automatic redirect to `/upload` after successful Google authentication
+
+-   **Authentication Context**: The `useAuth` hook provides user session information and methods:
+    -   `signInWithEmail`: Email/password login
+    -   `signInWithGoogle`: Google OAuth login
+    -   `signUp`: Email/password registration
+    -   `signOut`: User logout
+
+-   **Protected Routes**: Authenticated users are redirected to protected routes. Unauthenticated users attempting to access protected routes or specific CTAs are redirected to the login page with a redirect query parameter.
+
+### 7.2. Profile Page & Subscription Management
+
+**Comprehensive Profile Management System:**
+
+-   **Account Status Logic**:
+    -   **Free Plan Users**: Show "inactive" status to encourage upgrades
+    -   **Basic/Pro Plan Users**: Show "active" status when subscription is valid
+    -   Status determination considers subscription records and plan types
+
+-   **Enhanced Billing Management**:
+    -   **Plan Selection Dialog**: Modal with side-by-side plan comparison
+    -   **Smart Plan Options**:
+        - **Free Users**: Can choose Basic ($39) or Pro ($99) plans
+        - **Basic Users**: Can renew Basic plan or upgrade to Pro
+        - **Pro Users**: Can renew Pro or downgrade to Basic
+    -   **Visual Indicators**: Current plan highlighted with badges and colored borders
+    -   **Loading States**: Processing indicators during checkout
+
+-   **Generation Limit Management**:
+    -   **Glowing Button Feature**: When users exhaust their generation limit (`operations_used >= operations_limit`), the "Manage Billing" button:
+        - Glows with pulse animation (`animate-pulse`)
+        - Shows glowing ring (`ring-2 ring-brand-green/50`)
+        - Changes text to "Upgrade Plan - No Generations Left!"
+        - Works for all plan types (Free, Basic, Pro)
+
+-   **Navigation Integration**:
+    -   "View Generation History" button properly navigates to `/output-history`
+    -   Seamless integration with existing routing system
+
+### 7.3. Viewing Pricing Plans
 
 -   **Homepage (`home.tsx`) and `PricingSection.tsx`**:
     -   Fetches plan details (Price ID, amount, currency, interval, and expanded product information including `product.name`) from the `supabase-functions-get-plans` Edge Function.
@@ -81,7 +123,7 @@ A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that re
     -   The `PricingSection.tsx` component is reused here, and it follows the same logic for fetching and displaying plan details and names.
     -   Plan names and features are determined client-side, with overrides possible via props to `PricingSection`.
 
-### 7.3. File Upload and Processing (`UploadPage.tsx`)
+### 7.4. File Upload and Processing (`UploadPage.tsx`)
 
 -   **User Usage Tracking**:
     -   Fetches `generations_used` and `generation_limit` for the logged-in user from the `users` table in Supabase.
@@ -108,19 +150,55 @@ A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that re
     -   If `generations_used >= generation_limit`, the upload UI is disabled, and an upgrade dialog is presented.
     -   This dialog reuses the `PricingSection.tsx` component, configured with explicit plan features passed as props to ensure consistency with the homepage, even if the underlying Stripe plan data (via `supabase-functions-get-plans`) might differ slightly.
 
-### 7.4. Stripe Checkout Integration
+### 7.5. Stripe Checkout Integration
 
--   Initiated from either the `PricingSection.tsx` (in the upgrade dialog) or the main pricing section on `home.tsx`.
--   The `handleCheckout` function is called (defined in `home.tsx` or `PricingSection.tsx`, or imported from `lib/stripeUtils.ts`).
--   This function calls the `supabase-functions-create-checkout` Edge Function.
-    -   This function takes the `priceId` and `userId`.
-    -   The Edge Function creates a Stripe Checkout Session, ensuring `allow_promotion_codes: true` is set to enable coupon entry on the Stripe-hosted page. It then returns the session URL.
--   The frontend redirects the user to the Stripe Checkout URL.
--   After payment, Stripe redirects the user to a success URL (e.g., `/profile` or `/success`).
+**Enhanced Checkout System:**
+
+-   **Initiation**: Triggered from:
+    -   `PricingSection.tsx` (upgrade dialogs)
+    -   Main pricing section on `home.tsx`
+    -   Profile page billing management
+
+-   **Checkout Process**:
+    -   Uses `initiateCheckout` function from `lib/stripeUtils.ts`
+    -   Calls `supabase-functions-create-checkout` Edge Function
+    -   Creates Stripe Checkout Session with:
+        - Correct Price IDs: `price_1RTkaDDa07Wwp5KNnZF36GsC` (Basic), `price_1RTka9Da07Wwp5KNiRxFGnsG` (Pro)
+        - `allow_promotion_codes: true` for coupon support
+        - User metadata for webhook processing
+    -   Redirects to Stripe-hosted checkout page
+
+-   **Post-Payment**: Stripe redirects to success URL with updated subscription status
 
 ## 8. Styling and Theme
 
 -   **Theme**: The `PricingSection.tsx` component supports a `theme` prop ('light' or 'dark') to adjust its appearance, primarily used in the `UploadPage.tsx` dialog for a light theme. The main site uses a dark theme.
 -   **Responsive Design**: Tailwind CSS's responsive prefixes (e.g., `md:`, `lg:`) are used to ensure the application is usable across different screen sizes.
+-   **Interactive Elements**: 
+    -   Glowing animations for urgent actions (billing management when generations exhausted)
+    -   Loading states with spinners and disabled controls
+    -   Hover effects and transitions for enhanced user experience
 
-This frontend architecture allows for a reactive user experience, with clear separation of concerns for UI, state, and interactions with the Supabase backend. 
+## 9. Recent Enhancements
+
+### 9.1. Google OAuth Integration
+- Seamless Google sign-in/sign-up across authentication forms
+- Consistent branding and user experience
+- Automatic redirect handling post-authentication
+
+### 9.2. Enhanced Profile Management
+- Comprehensive billing management with plan selection dialogs
+- Smart account status determination based on plan types
+- Visual indicators for current plans and upgrade options
+
+### 9.3. Generation Preservation System
+- Unused generations preserved when upgrading/renewing plans
+- Fair billing system that maintains user value
+- Clear visual feedback for generation limits and usage
+
+### 9.4. Improved User Experience
+- Glowing buttons for urgent actions
+- Loading states throughout the application
+- Responsive design with consistent theming
+
+This frontend architecture allows for a reactive user experience, with clear separation of concerns for UI, state, and interactions with the Supabase backend. The recent enhancements focus on improving user onboarding, subscription management, and overall user experience while maintaining code quality and maintainability. 

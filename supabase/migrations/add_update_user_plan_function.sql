@@ -15,7 +15,7 @@ BEGIN
   SET 
     current_plan_id = plan_id_param,
     generation_limit = limit_param,
-    generations_used = 0,
+    generations_used = 0, -- Reset usage counter since limit_param already includes remaining generations
     updated_at = NOW()
   WHERE id = user_id_param;
   
