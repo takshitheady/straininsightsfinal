@@ -25,9 +25,21 @@ The frontend is a single-page application (SPA) built using **React** and **Vite
     -   `home/`: Components for the landing/home page (e.g., `PricingSection.tsx`).
     -   `pages/`: Top-level page components that correspond to routes (e.g., `home.tsx`, `Upload.tsx`, `Profile.tsx`).
     -   `ui/`: Shadcn/ui components (Button, Card, Dialog, etc.).
+    -   **`admin/`: Complete admin dashboard system** *(NEW)*
+        -   `components/`: Reusable admin components
+            -   `AdminAuthGuard.tsx`: Route protection for admin-only access
+        -   `layout/`: Admin dashboard layout components
+            -   `AdminLayout.tsx`: Main admin dashboard layout with sidebar navigation
+        -   `pages/`: Admin-specific page components
+            -   `AdminOverview.tsx`: Analytics dashboard with key metrics
+            -   `UserManagement.tsx`: User CRUD operations and plan management
+            -   `AdminSettings.tsx`: Admin user management and platform settings
 -   `lib/`: Utility functions and helper modules (e.g., `stripeUtils.ts`).
 -   `stories/`: Storybook stories for component development and testing (not extensively used in this project).
 -   `supabase/`: Supabase client setup and authentication context (`auth.tsx`, `supabase.ts`).
+-   `types/`: TypeScript type definitions
+    -   `supabase.ts`: Auto-generated Supabase types
+    -   **`admin.ts`: Admin-specific type definitions** *(NEW)*
 -   `App.tsx`: The main application component, sets up routing.
 -   `main.tsx`: The entry point of the application.
 
@@ -35,170 +47,298 @@ The frontend is a single-page application (SPA) built using **React** and **Vite
 
 Client-side routing is managed by `react-router-dom`. The main routes are defined in `src/App.tsx`.
 
+### 4.1. Public Routes
 -   `/`: Home page (`src/components/pages/home.tsx`)
 -   `/login`: Login page (`src/components/auth/LoginForm.tsx`)
 -   `/signup`: Sign up page (`src/components/auth/SignUpForm.tsx`)
--   `/upload`: File upload page (`src/components/pages/Upload.tsx`) - Private Route
--   `/output-history`: User's COA processing history (`src/components/pages/OutputHistory.tsx`) - Private Route
--   `/profile`: User profile and subscription management (`src/components/pages/Profile.tsx`) - Private Route
 -   `/success`: Page displayed after successful Stripe checkout.
 
+### 4.2. Private Routes (User Authentication Required)
+-   `/upload`: File upload page (`src/components/pages/Upload.tsx`)
+-   `/output-history`: User's COA processing history (`src/components/pages/OutputHistory.tsx`)
+-   `/profile`: User profile and subscription management (`src/components/pages/Profile.tsx`)
+
+### 4.3. Admin Routes (Admin Authentication Required) *(NEW)*
+-   `/admin`: Admin dashboard overview (`src/components/admin/pages/AdminOverview.tsx`)
+-   `/admin/users`: User management interface (`src/components/admin/pages/UserManagement.tsx`)
+-   `/admin/settings`: Admin settings and configuration (`src/components/admin/pages/AdminSettings.tsx`)
+
 A `PrivateRoute` higher-order component in `src/App.tsx` protects routes that require authentication. It checks the user's authentication status using the `useAuth` hook from `src/supabase/auth.tsx`. Additionally, key call-to-action buttons (like "Upload" or "Choose Plan") incorporate checks: if a user is not authenticated, they are prompted to log in, often redirecting to the login page with a return path.
+
+**Admin routes are protected by `AdminAuthGuard`** which verifies both user authentication and admin privileges through the `is_admin` database function.
 
 ## 5. State Management
 
 -   **Component-Level State**: Primarily managed using React's `useState` and `useEffect` hooks for local component data and side effects.
--   **Authentication State**: Managed globally via `src/supabase/auth.tsx`, which provides an `AuthProvider` context. The `useAuth` hook allows any component to access the current user's authentication status and profile information.
--   **Data Fetching & Caching**:
-    -   Pricing plans on the homepage (`src/components/pages/home.tsx`) are fetched from a Supabase Edge Function and cached in `localStorage` for 24 hours to reduce API calls.
-    -   User-specific data (like generation usage and limits on `UploadPage`) is fetched directly from the Supabase database.
+-   **Authentication State**: Handled via the `useAuth` hook from `src/supabase/auth.tsx`, providing user session management across the application.
+-   **Admin State**: Managed locally within admin components with real-time data fetching from Supabase Edge Functions.
 
-## 6. UI Components and Styling
+## 6. Authentication & Authorization
 
--   **Shadcn/ui**: Provides a base set of unstyled, accessible components (e.g., `Button`, `Card`, `Dialog`, `Input`, `Toast`). These are then customized with Tailwind CSS.
--   **Tailwind CSS**: Used extensively for styling. Utility classes are applied directly in the JSX.
--   **Custom Components**: Specific components like `PricingSection.tsx` and the file upload interface in `UploadPage.tsx` are custom-built using Shadcn/ui primitives and Tailwind CSS.
--   **Framer Motion**: Used for page transitions and micro-interactions to enhance the user experience.
+### 6.1. User Authentication
+The application uses Supabase Auth for user management with support for:
+-   **Email/Password Authentication**: Traditional email and password signup/login
+-   **Google OAuth**: Social authentication via Google
+-   **Session Management**: Automatic token refresh and session persistence
+-   **Protected Routes**: Route-level authentication checks
 
-## 7. Key User Interactions & Flows
+### 6.2. Admin Authorization *(NEW)*
+A comprehensive admin system with role-based access control:
 
-### 7.1. Authentication
+#### Admin Access Control
+```typescript
+// AdminAuthGuard.tsx - Protects admin routes
+const AdminAuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, loading } = useAuth();
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [checking, setChecking] = useState<boolean>(true);
 
-**Enhanced Authentication System with Google OAuth:**
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (!user) return;
+      
+      const { data, error } = await supabase.rpc('is_admin', {
+        user_email: user.email
+      });
+      
+      setIsAdmin(!!data);
+      setChecking(false);
+    };
 
--   **Email/Password Authentication**: Traditional sign-up and login using email and password.
--   **Google OAuth Integration**: 
-    -   Users can sign up or log in using their Google accounts
-    -   Implemented in both `LoginForm.tsx` and `SignUpForm.tsx`
-    -   Features official Google branding and consistent UI/UX
-    -   Includes loading states and comprehensive error handling
-    -   Automatic redirect to `/upload` after successful Google authentication
+    checkAdminStatus();
+  }, [user]);
 
--   **Authentication Context**: The `useAuth` hook provides user session information and methods:
-    -   `signInWithEmail`: Email/password login
-    -   `signInWithGoogle`: Google OAuth login
-    -   `signUp`: Email/password registration
-    -   `signOut`: User logout
+  // Returns admin interface or access denied
+};
+```
 
--   **Protected Routes**: Authenticated users are redirected to protected routes. Unauthenticated users attempting to access protected routes or specific CTAs are redirected to the login page with a redirect query parameter.
+#### Admin Roles
+-   **Super Admin**: Full platform access and user management
+-   **Admin**: User management and analytics access
+-   **Role Assignment**: Managed via database function `is_admin(user_email)`
 
-### 7.2. Profile Page & Subscription Management
+## 7. Component Architecture
 
-**Comprehensive Profile Management System:**
+### 7.1. Authentication Components
+-   **`AuthLayout.tsx`**: Shared layout for login/signup pages
+-   **`LoginForm.tsx`**: User login interface with Google OAuth
+-   **`SignUpForm.tsx`**: User registration interface
 
--   **Account Status Logic**:
-    -   **Free Plan Users**: Show "inactive" status to encourage upgrades
-    -   **Basic/Pro Plan Users**: Show "active" status when subscription is valid
-    -   Status determination considers subscription records and plan types
+### 7.2. Dashboard Components
+-   **User Dashboard**: Personal analytics and file management
+-   **`ActivityFeed.tsx`**: Recent user activity display
+-   **`TaskBoard.tsx`**: Task management interface
+-   **`UserProfile.tsx`**: User profile management
 
--   **Enhanced Billing Management**:
-    -   **Plan Selection Dialog**: Modal with side-by-side plan comparison
-    -   **Smart Plan Options**:
-        - **Free Users**: Can choose Basic ($39) or Pro ($99) plans
-        - **Basic Users**: Can renew Basic plan or upgrade to Pro
-        - **Pro Users**: Can renew Pro or downgrade to Basic
-    -   **Visual Indicators**: Current plan highlighted with badges and colored borders
-    -   **Loading States**: Processing indicators during checkout
+### 7.3. Admin Dashboard Components *(NEW)*
 
--   **Generation Limit Management**:
-    -   **Glowing Button Feature**: When users exhaust their generation limit (`operations_used >= operations_limit`), the "Manage Billing" button:
-        - Glows with pulse animation (`animate-pulse`)
-        - Shows glowing ring (`ring-2 ring-brand-green/50`)
-        - Changes text to "Upgrade Plan - No Generations Left!"
-        - Works for all plan types (Free, Basic, Pro)
+#### Core Admin Components
+```typescript
+// AdminLayout.tsx - Main admin dashboard layout
+interface AdminLayoutProps {
+  children: React.ReactNode;
+}
 
--   **Navigation Integration**:
-    -   "View Generation History" button properly navigates to `/output-history`
-    -   Seamless integration with existing routing system
+const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Sidebar />
+      <div className="lg:pl-64">
+        <TopNavigation />
+        <main className="py-6">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            {children}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+};
+```
 
-### 7.3. Viewing Pricing Plans
+#### Admin Page Components
 
--   **Homepage (`home.tsx`) and `PricingSection.tsx`**:
-    -   Fetches plan details (Price ID, amount, currency, interval, and expanded product information including `product.name`) from the `supabase-functions-get-plans` Edge Function.
-    -   Caches this data in `localStorage` for 24 hours.
-    -   Displays plan names by prioritizing `plan.product.name` from Stripe, then falling back to a local `planNames` map (keyed by live Price IDs), then `plan.nickname`, and finally the Price ID itself.
-    -   Features are determined client-side based on plan details.
--   **Upload Page Dialog (`UploadPage.tsx` using `PricingSection.tsx`)**:
-    -   When a user hits their generation limit, a dialog appears showing available plans.
-    -   The `PricingSection.tsx` component is reused here, and it follows the same logic for fetching and displaying plan details and names.
-    -   Plan names and features are determined client-side, with overrides possible via props to `PricingSection`.
+**AdminOverview.tsx - Analytics Dashboard**
+-   User registration metrics
+-   Plan distribution analytics
+-   Revenue tracking
+-   Platform usage statistics
+-   Recent user activity feed
 
-### 7.4. File Upload and Processing (`UploadPage.tsx`)
+**UserManagement.tsx - User CRUD Interface**
+-   User search and filtering
+-   Plan management (free/basic/pro)
+-   Generation limit control
+-   User deletion capabilities
+-   Bulk operations support
 
--   **User Usage Tracking**:
-    -   Fetches `generations_used` and `generation_limit` for the logged-in user from the `users` table in Supabase.
-    -   Disables upload functionality if the limit is reached.
--   **File Selection**:
-    -   Users can drag-and-drop or use a file input to select a PDF (max 1MB).
-    -   Basic client-side validation for file type and size.
--   **Upload Process**:
-    1.  `handleUpload` or `handleUploadLong` is triggered.
-    2.  The `uploadToSupabase` function is called:
-        a.  File is uploaded to Supabase Storage in the `labresults` bucket with a unique name (`<user_id>/<timestamp>-<filename>`).
-        b.  A record is inserted into the `lab_results` table with `status: 'pending'`.
-        c.  The user's `generations_used` count in the `users` table is incremented.
-        d.  The status of the `lab_results` record is updated to `processing`.
-        e.  The appropriate Edge Function (`process-lab-result` or `process-lab-result-long`) is invoked with the `storagePath` and `labResultId`.
-    3.  The UI updates to show an "uploading" and then "processing" state.
--   **Polling for Results**:
-    -   Once the Edge Function is invoked, the frontend starts polling the `lab_results` table for the specific `labResultId`.
-    -   The `fetchDescription` function in `UploadPage.tsx` polls every 3 seconds (for up to 15 attempts).
-    -   It checks the `status` and `description` fields.
-    -   If `status` becomes `'completed'` and `description` is available, it's displayed.
-    -   If `status` becomes `'error'` or polling times out, an error message is shown.
--   **Upgrade Dialog**:
-    -   If `generations_used >= generation_limit`, the upload UI is disabled, and an upgrade dialog is presented.
-    -   This dialog reuses the `PricingSection.tsx` component, configured with explicit plan features passed as props to ensure consistency with the homepage, even if the underlying Stripe plan data (via `supabase-functions-get-plans`) might differ slightly.
+**AdminSettings.tsx - Platform Configuration**
+-   Admin user management
+-   System settings configuration
+-   Platform-wide controls
 
-### 7.5. Stripe Checkout Integration
+## 8. Data Flow Architecture
 
-**Enhanced Checkout System:**
+### 8.1. User Data Flow
+```
+User Action → React Component → Supabase Client → Database/Edge Function → Response → Component Update
+```
 
--   **Initiation**: Triggered from:
-    -   `PricingSection.tsx` (upgrade dialogs)
-    -   Main pricing section on `home.tsx`
-    -   Profile page billing management
+### 8.2. Admin Data Flow *(NEW)*
+```
+Admin Action → Admin Component → AdminAuthGuard → Supabase Edge Function (admin-operations) → Database → Response → Admin Interface Update
+```
 
--   **Checkout Process**:
-    -   Uses `initiateCheckout` function from `lib/stripeUtils.ts`
-    -   Calls `supabase-functions-create-checkout` Edge Function
-    -   Creates Stripe Checkout Session with:
-        - Correct Price IDs: `price_1RTkaDDa07Wwp5KNnZF36GsC` (Basic), `price_1RTka9Da07Wwp5KNiRxFGnsG` (Pro)
-        - `allow_promotion_codes: true` for coupon support
-        - User metadata for webhook processing
-    -   Redirects to Stripe-hosted checkout page
+#### Admin Operations Flow
+1. **Authentication**: Admin logs in with standard user credentials
+2. **Authorization**: `AdminAuthGuard` verifies admin status via `is_admin()` function
+3. **Data Fetching**: Admin components call `admin-operations` Edge Function
+4. **Database Operations**: Edge Function executes admin queries with service role
+5. **Response**: Real-time updates to admin interface
 
--   **Post-Payment**: Stripe redirects to success URL with updated subscription status
+### 8.3. Edge Function Integration
+-   **`get-plans`**: Fetch Stripe pricing plans
+-   **`create-checkout`**: Generate Stripe checkout sessions
+-   **`payments-webhook`**: Handle Stripe webhook events
+-   **`admin-operations`**: Handle all admin-related database operations *(NEW)*
 
-## 8. Styling and Theme
+## 9. Styling & UI Components
 
--   **Theme**: The `PricingSection.tsx` component supports a `theme` prop ('light' or 'dark') to adjust its appearance, primarily used in the `UploadPage.tsx` dialog for a light theme. The main site uses a dark theme.
--   **Responsive Design**: Tailwind CSS's responsive prefixes (e.g., `md:`, `lg:`) are used to ensure the application is usable across different screen sizes.
--   **Interactive Elements**: 
-    -   Glowing animations for urgent actions (billing management when generations exhausted)
-    -   Loading states with spinners and disabled controls
-    -   Hover effects and transitions for enhanced user experience
+### 9.1. Design System
+-   **Tailwind CSS**: Utility-first CSS framework
+-   **Shadcn/ui**: Consistent, accessible component library
+-   **Responsive Design**: Mobile-first approach
+-   **Dark/Light Mode**: Theme support (where applicable)
 
-## 9. Recent Enhancements
+### 9.2. Component Library Usage
+```typescript
+// Example of Shadcn/ui component usage in admin interface
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-### 9.1. Google OAuth Integration
-- Seamless Google sign-in/sign-up across authentication forms
-- Consistent branding and user experience
-- Automatic redirect handling post-authentication
+// Admin dashboard metrics card
+<Card>
+  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+    <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+    <Users className="h-4 w-4 text-muted-foreground" />
+  </CardHeader>
+  <CardContent>
+    <div className="text-2xl font-bold">{metrics?.totalUsers || 0}</div>
+    <p className="text-xs text-muted-foreground">
+      +20.1% from last month
+    </p>
+  </CardContent>
+</Card>
+```
 
-### 9.2. Enhanced Profile Management
-- Comprehensive billing management with plan selection dialogs
-- Smart account status determination based on plan types
-- Visual indicators for current plans and upgrade options
+## 10. Type Safety
 
-### 9.3. Generation Preservation System
-- Unused generations preserved when upgrading/renewing plans
-- Fair billing system that maintains user value
-- Clear visual feedback for generation limits and usage
+### 10.1. TypeScript Integration
+-   **Strict Mode**: Enabled for maximum type safety
+-   **Auto-generated Types**: Supabase CLI generates database types
+-   **Custom Types**: Admin-specific interfaces and types
 
-### 9.4. Improved User Experience
-- Glowing buttons for urgent actions
-- Loading states throughout the application
-- Responsive design with consistent theming
+### 10.2. Admin Type Definitions *(NEW)*
+```typescript
+// src/types/admin.ts
+export interface AdminUser {
+  id: string;
+  user_id: string;
+  email: string;
+  full_name: string | null;
+  current_plan_id: string;
+  generation_limit: number;
+  generations_used: number;
+  created_at: string;
+  subscription_status: string | null;
+  current_period_end: number | null;
+  total_uploads: number;
+}
 
-This frontend architecture allows for a reactive user experience, with clear separation of concerns for UI, state, and interactions with the Supabase backend. The recent enhancements focus on improving user onboarding, subscription management, and overall user experience while maintaining code quality and maintainability. 
+export interface PlatformMetrics {
+  totalUsers: number;
+  activeSubscribers: number;
+  totalUploads: number;
+  monthlyRevenue: number;
+  freeUsers: number;
+  basicUsers: number;
+  proUsers: number;
+}
+
+export interface UpdateUserPlanParams {
+  userId: string;
+  planId: 'free' | 'basic' | 'pro';
+  generationLimit: number;
+}
+```
+
+## 11. Performance Considerations
+
+### 11.1. Optimization Strategies
+-   **Code Splitting**: Route-based code splitting for admin modules
+-   **Lazy Loading**: Admin components loaded only when needed
+-   **Memoization**: React.memo for expensive admin calculations
+-   **Pagination**: Large user lists with server-side pagination
+
+### 11.2. Admin-Specific Optimizations
+```typescript
+// Lazy loading admin routes
+const AdminOverview = lazy(() => import('./components/admin/pages/AdminOverview'));
+const UserManagement = lazy(() => import('./components/admin/pages/UserManagement'));
+const AdminSettings = lazy(() => import('./components/admin/pages/AdminSettings'));
+
+// Route configuration with Suspense
+<Route 
+  path="/admin" 
+  element={
+    <AdminAuthGuard>
+      <Suspense fallback={<div>Loading admin panel...</div>}>
+        <AdminLayout>
+          <AdminOverview />
+        </AdminLayout>
+      </Suspense>
+    </AdminAuthGuard>
+  } 
+/>
+```
+
+## 12. Security Considerations
+
+### 12.1. Authentication Security
+-   **JWT Tokens**: Secure session management
+-   **Row Level Security**: Database-level access control
+-   **HTTPS Only**: Secure communication channels
+
+### 12.2. Admin Security *(NEW)*
+-   **Role-Based Access**: Database-level admin verification
+-   **Service Role Functions**: Secure admin operations
+-   **Audit Logging**: Admin action tracking (implemented in Edge Functions)
+-   **Input Validation**: Comprehensive validation for admin operations
+
+```typescript
+// Example admin security implementation
+const { data: isAdminData, error: adminError } = await supabase.rpc('is_admin', {
+  user_email: user.email
+});
+
+if (adminError || !isAdminData) {
+  throw new Error('Insufficient permissions');
+}
+```
+
+## 13. Future Enhancements
+
+### 13.1. Planned Features
+-   **Real-time Admin Notifications**: Live updates for admin dashboard
+-   **Advanced Analytics**: Detailed user behavior analytics
+-   **Bulk User Operations**: Enhanced batch processing capabilities
+-   **Admin Audit Trail**: Comprehensive admin action logging
+-   **Role Hierarchy**: Multiple admin permission levels
+
+### 13.2. Technical Improvements
+-   **Caching Strategy**: Redis integration for admin data caching
+-   **WebSocket Integration**: Real-time admin dashboard updates
+-   **Progressive Web App**: Offline admin capabilities
+-   **Advanced Search**: Elasticsearch integration for user search 

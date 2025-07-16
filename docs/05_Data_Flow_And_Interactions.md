@@ -1,228 +1,556 @@
-# Data Flow and System Interactions
+# Data Flow and Interactions
 
-This document illustrates key data flows and interactions between the frontend, Supabase backend (Database, Auth, Storage, Edge Functions), and external services like Stripe and AI models.
+This document details the data flow and interactions within the StrainInsights application, including the comprehensive admin management system.
 
-## Flow 1: User Registration (Enhanced with Google OAuth)
+## 1. Overview
 
-### 1A: Email/Password Registration
-1.  **Frontend (`SignUpForm.tsx`)**: User enters email and password.
-2.  **Frontend**: Calls `supabase.auth.signUp({ email, password })`.
-3.  **Supabase Auth**: Creates a new user in `auth.users` table.
-4.  **Supabase Auth**: Sends a confirmation email to the user.
-5.  **(Post-confirmation)**:
-    *   A Supabase Database Trigger on `auth.users` table creates a corresponding record in the public `users` table.
-    *   This new record has `id` (from `auth.users.id`), `email`, `current_plan_id: 'free'`, default `generation_limit: 10`, and `generations_used: 0`.
-6.  **Frontend**: Redirects to confirmation page or login page.
+The StrainInsights application follows a multi-tier architecture with clear separation between frontend, backend services, and data persistence layers. Data flows through well-defined channels with proper authentication, authorization, and error handling.
 
-### 1B: Google OAuth Registration
-1.  **Frontend (`SignUpForm.tsx`)**: User clicks "Continue with Google" button.
-2.  **Frontend**: Calls `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: '/upload' } })`.
-3.  **Supabase Auth**: Redirects user to Google OAuth consent screen.
-4.  **Google**: User grants permissions and is redirected back to Supabase.
-5.  **Supabase Auth**: Creates new user in `auth.users` table with Google profile data.
-6.  **Database Trigger**: Automatically creates corresponding record in `users` table with default free plan settings.
-7.  **Frontend**: User is redirected to `/upload` with active session.
+## 2. System Architecture
 
-## Flow 2: User Login (Enhanced with Google OAuth)
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  React Frontend │────│  Supabase Edge   │────│   PostgreSQL    │
+│                 │    │    Functions     │    │    Database     │
+│  - User UI      │    │  - Business      │    │  - User Data    │
+│  - Admin UI     │    │    Logic         │    │  - Subscriptions│
+│  - Auth UI      │    │  - Payments      │    │  - Lab Results  │
+└─────────────────┘    │  - Admin Ops     │    │  - Admin Views  │
+         │              └──────────────────┘    └─────────────────┘
+         │                       │                       │
+         │              ┌──────────────────┐    ┌─────────────────┐
+         └──────────────│  Supabase Auth   │────│  Stripe API     │
+                        │                  │    │                 │
+                        │  - JWT Tokens    │    │  - Payments     │
+                        │  - Google OAuth  │    │  - Webhooks     │
+                        │  - Session Mgmt  │    │  - Subscriptions│
+                        └──────────────────┘    └─────────────────┘
+```
 
-### 2A: Email/Password Login
-1.  **Frontend (`LoginForm.tsx`)**: User enters email and password.
-2.  **Frontend**: Calls `supabase.auth.signInWithPassword({ email, password })`.
-3.  **Supabase Auth**: Verifies credentials, creates session, returns JWT.
-4.  **Frontend (`AuthProvider`)**: Stores session, updates user state.
-5.  **Frontend**: User accesses protected routes with JWT authentication.
+## 3. Core Data Flows
 
-### 2B: Google OAuth Login
-1.  **Frontend (`LoginForm.tsx`)**: User clicks "Continue with Google" button.
-2.  **Frontend**: Calls `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: '/upload' } })`.
-3.  **Supabase Auth**: Redirects to Google OAuth.
-4.  **Google**: User authenticates and is redirected back.
-5.  **Supabase Auth**: Creates session with existing user account.
-6.  **Frontend**: User is redirected to `/upload` with active session.
+### 3.1. User Authentication Flow
 
-## Flow 3: Viewing Pricing Plans (Homepage & Upgrade Dialog)
+#### Standard User Authentication
+```
+1. User Login Request
+   ├─ Frontend (LoginForm.tsx)
+   ├─ Supabase Auth (email/password or Google OAuth)
+   ├─ JWT Token Generation
+   ├─ Database Trigger (handle_new_user/handle_user_update)
+   └─ Frontend State Update (useAuth hook)
 
-1.  **Frontend (`home.tsx` or `PricingSection.tsx`)**: Component mounts or is displayed.
-2.  **Frontend**: Checks `localStorage` for cached plans data (`pricingPlans` and `pricingPlansTimestamp`).
-    *   **Cache Hit (Valid)**: Uses cached data to display plans.
-    *   **Cache Miss (or Expired)**: Proceeds to fetch from API.
-3.  **Frontend**: Calls `supabase.functions.invoke('get-plans')`.
-4.  **Supabase Edge Function (`get-plans`)**: Receives the request.
-    *   Uses **live** `STRIPE_SECRET_KEY` to initialize Stripe client.
-    *   Calls `stripe.prices.list({ active: true, expand: ['data.product'] })` to fetch active prices.
-    *   Returns enhanced JSON array with correct pricing:
-        ```json
-        [
-          {
-            "id": "price_1RTkaDDa07Wwp5KNnZF36GsC",
-            "amount": 3900, // $39.00
-            "nickname": "Basic Plan",
-            "generation_limit": 30
-          },
-          {
-            "id": "price_1RTka9Da07Wwp5KNiRxFGnsG", 
-            "amount": 9900, // $99.00
-            "nickname": "Pro Plan",
-            "generation_limit": 100
-          }
-        ]
-        ```
-5.  **Frontend**: Receives plan data, caches it, and renders pricing cards with correct features and pricing.
+2. Session Management
+   ├─ Automatic Token Refresh
+   ├─ Persistent Session Storage
+   ├─ Route Protection (PrivateRoute component)
+   └─ Context Propagation (AuthProvider)
+```
 
-## Flow 4: Enhanced Profile Management
+#### Admin Authentication Flow *(NEW)*
+```
+1. Admin Login
+   ├─ Standard User Authentication (above)
+   ├─ Admin Authorization Check
+   │  ├─ AdminAuthGuard Component
+   │  ├─ Database Function Call: is_admin(user_email)
+   │  └─ Admin Status Verification
+   └─ Admin Dashboard Access Grant/Deny
 
-### 4A: Account Status Determination
-1.  **Frontend (`Profile.tsx`)**: Page loads for authenticated user.
-2.  **Frontend**: Fetches user data from `users` table including `current_plan_id`, `generation_limit`, `generations_used`.
-3.  **Frontend**: Determines account status:
-    *   **Free Plan (`current_plan_id: 'free'`)**: Status = "inactive" (encourages upgrades)
-    *   **Basic/Pro Plans**: Fetches subscription data and sets status = "active" if valid
-4.  **Frontend**: Displays appropriate status and plan information.
+2. Admin Session Verification
+   ├─ JWT Token Validation
+   ├─ Admin Role Re-verification (on sensitive operations)
+   ├─ Service Role Access (for database operations)
+   └─ Audit Logging
+```
 
-### 4B: Billing Management with Plan Selection
-1.  **Frontend**: User clicks "Manage Billing" button.
-2.  **Frontend**: Checks if generations are exhausted (`generations_used >= generation_limit`):
-    *   **If exhausted**: Button glows with pulse animation and shows "Upgrade Plan - No Generations Left!"
-3.  **Frontend**: Opens plan selection dialog based on current plan:
-    *   **Free Users**: Can choose Basic or Pro plans
-    *   **Basic Users**: Can renew Basic or upgrade to Pro
-    *   **Pro Users**: Can renew Pro or downgrade to Basic
-4.  **Frontend**: User selects plan and proceeds to Stripe checkout (see Flow 5).
+### 3.2. User Registration and Profile Management
 
-### 4C: Navigation Integration
-1.  **Frontend**: User clicks "View Generation History".
-2.  **Frontend**: Navigates to `/output-history` using React Router.
-3.  **Frontend**: Displays user's COA processing history from `lab_results` table.
+#### New User Registration
+```
+1. Frontend Registration
+   ├─ SignUpForm.tsx (email/password or Google OAuth)
+   ├─ Supabase Auth.signUp()
+   └─ Redirect to Email Verification (if email/password)
 
-## Flow 5: File Upload, Processing, and Result Display (`UploadPage.tsx`)
+2. Database Profile Creation
+   ├─ Auth Trigger: on_auth_user_created
+   ├─ Function: handle_new_user()
+   ├─ Insert into users table with defaults:
+   │  ├─ current_plan_id: 'free'
+   │  ├─ generation_limit: 1
+   │  └─ generations_used: 0
+   └─ User Profile Ready
 
-1.  **Frontend**: User clicks an "Upload" call-to-action button.
-    *   **Auth Check**: If not authenticated, redirected to `/login` with redirect parameter.
-    *   If authenticated, user selects/drops a PDF file.
-    *   Client-side validation (type, size).
-    *   User usage is fetched to check if upload is allowed.
-    *   If limit reached, upload disabled and upgrade dialog shown.
-2.  **Frontend**: User clicks "Extract COA Data" (short or long analysis).
-    *   `handleUpload` / `handleUploadLong` function triggered.
-    *   UI status set to `'uploading'`.
-3.  **Frontend (`uploadToSupabase` function)**:
-    *   **Upload to Storage**: File uploaded to `labresults` bucket under `<user_id>/<timestamp>-<filename>.pdf`.
-    *   **DB Insert**: New record in `lab_results` table with `status: 'pending'`.
-    *   **Update Usage**: `generations_used` incremented in `users` table.
-    *   **Update Status**: `lab_results` status updated to `'processing'`.
-    *   **Invoke Edge Function**: Calls appropriate processing function with `pdfStoragePath` and `labResultId`.
-4.  **Supabase Edge Function (`process-lab-result`)**: 
-    *   Downloads PDF from storage.
-    *   Extracts text from PDF.
-    *   Sends to AI/LLM service for analysis.
-    *   Updates `lab_results` with generated description and `status: 'completed'`.
-5.  **Frontend (Polling)**: Polls `lab_results` table for completion and displays results.
+3. Profile Updates
+   ├─ Auth Trigger: on_auth_user_updated
+   ├─ Function: handle_user_update()
+   └─ Sync profile data between auth.users and users tables
+```
 
-## Flow 6: Enhanced User Subscription (Stripe Checkout with Generation Preservation)
+## 4. Subscription Management Flows
 
-1.  **Frontend**: User clicks plan selection from Profile page or pricing section.
-    *   **Auth Check**: If not authenticated, redirected to login.
-2.  **Frontend (`initiateCheckout`)**: Calls `supabase.functions.invoke('create-checkout')` with enhanced metadata:
-    ```javascript
-    {
-      body: {
-        price_id: "price_1RTkaDDa07Wwp5KNnZF36GsC", // Live Price ID
-        user_id: user.id,
-        return_url: `${window.location.origin}/profile`,
-        checkout_type: "upgrade" // or "renewal", "new_subscription"
-      }
-    }
-    ```
-3.  **Supabase Edge Function (`create-checkout`)**: 
-    *   Initializes Stripe client with live keys.
-    *   Manages Stripe customer creation/retrieval.
-    *   Creates checkout session with enhanced metadata for webhook processing.
-    *   Returns session URL.
-4.  **Frontend**: Redirects to Stripe checkout page.
-5.  **Stripe**: User completes payment and is redirected to success URL.
-6.  **Stripe Webhook**: Sends events to `payments-webhook` Edge Function.
+### 4.1. Plan Selection and Checkout
 
-## Flow 7: Enhanced Stripe Webhook Processing with Generation Preservation
+```
+1. Plan Selection
+   ├─ Frontend: PricingSection.tsx
+   ├─ Get Plans: supabase.functions.invoke('get-plans')
+   ├─ Edge Function: get-plans
+   ├─ Stripe API: stripe.prices.list()
+   └─ Frontend: Display plans with pricing
 
-1.  **Stripe**: Sends webhook events to `payments-webhook` Edge Function.
-2.  **Supabase Edge Function (`payments-webhook`)**: 
-    *   Verifies Stripe signature using live webhook secret.
-    *   Parses event object.
-    
-    **Enhanced `checkout.session.completed` Handling**:
-    *   Extracts user and subscription information.
-    *   **Generation Preservation Logic**:
-        ```typescript
-        // Get current user data
-        const currentUserData = await supabaseClient
-          .from('users')
-          .select('current_plan_id, generation_limit, generations_used')
-          .eq('id', userId)
-          .single();
+2. Checkout Initiation
+   ├─ Frontend: initiateCheckout() (stripeUtils.ts)
+   ├─ Edge Function: create-checkout
+   ├─ Customer Management:
+   │  ├─ Retrieve or Create Stripe Customer
+   │  └─ Link to User Account
+   ├─ Checkout Session Creation:
+   │  ├─ Subscription Mode
+   │  ├─ User Metadata Embedding
+   │  └─ Success/Cancel URL Configuration
+   └─ Redirect: Stripe Checkout Page
 
-        // Calculate unused generations
-        const unusedGenerations = Math.max(0, 
-          currentUserData.generation_limit - currentUserData.generations_used
-        );
+3. Payment Processing
+   ├─ Stripe Checkout Completion
+   ├─ Webhook Event: checkout.session.completed
+   ├─ Edge Function: payments-webhook
+   └─ User Plan Activation (see Webhook Processing)
+```
 
-        // Set new limits with preservation
-        const newGenerationLimit = planGenerationLimit + unusedGenerations;
-        ```
-    *   Updates `users` table with preserved generations.
-    *   Creates detailed subscription record in `subscriptions` table.
-    
-    **Enhanced `customer.subscription.updated` Handling**:
-    *   Maps Stripe Price IDs to plan names:
-        ```typescript
-        const priceIdToPlanName = {
-          'price_1RTkaDDa07Wwp5KNnZF36GsC': 'basic',
-          'price_1RTka9Da07Wwp5KNiRxFGnsG': 'pro'
-        };
-        ```
-    *   Applies generation preservation for plan changes.
-    *   Updates both `users` and `subscriptions` tables.
-    
-    **Enhanced `customer.subscription.deleted` Handling**:
-    *   Downgrades user to free plan.
-    *   Preserves unused generations up to free tier limit (10).
-    *   Updates subscription status appropriately.
+### 4.2. Enhanced Webhook Processing with Generation Preservation
 
-3.  **Database Updates**: User's subscription details synchronized with generation preservation.
-4.  **Frontend**: Subsequent loads reflect updated subscription status and preserved generation limits.
+```
+1. Webhook Event Reception
+   ├─ Stripe sends webhook to payments-webhook function
+   ├─ Signature Verification (security)
+   ├─ Event Type Routing
+   └─ Event Processing
 
-## Flow 8: Generation Preservation Examples
+2. checkout.session.completed
+   ├─ Extract user and subscription data
+   ├─ Generation Preservation Logic:
+   │  ├─ Get current user data
+   │  ├─ Calculate unused generations
+   │  ├─ Add to new plan limit
+   │  └─ Set preserved usage count
+   ├─ User Plan Update:
+   │  ├─ current_plan_id → new plan
+   │  ├─ generation_limit → preserved limit
+   │  └─ generations_used → preserved usage
+   └─ Subscription Record Creation
 
-### Example 1: Basic to Pro Upgrade
-- **Before**: Basic plan (30 limit, 29 used = 1 unused)
-- **After Upgrade**: Pro plan (100 + 1 = 101 total generations)
-- **Result**: User gets full Pro benefits plus preserved unused generation
+3. customer.subscription.updated
+   ├─ Plan Change Detection
+   ├─ Generation Preservation Application
+   ├─ Subscription Status Update
+   └─ Billing Period Management
 
-### Example 2: Basic Plan Renewal
-- **Before**: Basic plan (30 limit, 25 used = 5 unused)
-- **After Renewal**: Basic plan (30 + 5 = 35 total generations)
-- **Result**: User gets fresh Basic plan plus unused generations
+4. customer.subscription.deleted
+   ├─ Cancellation Processing
+   ├─ Downgrade to Free Plan
+   ├─ Generation Limit Adjustment
+   └─ Status Cleanup
+```
 
-### Example 3: Pro to Free Downgrade
-- **Before**: Pro plan (100 limit, 90 used = 10 unused)
-- **After Downgrade**: Free plan (10 limit, preserves up to 10)
-- **Result**: User gets maximum free tier generations
+### 4.3. Generation Preservation Logic
 
-## Flow 9: Enhanced User Experience Features
+```
+// Example: Basic plan user (100 limit, 75 used = 25 remaining) upgrades to Pro
+Current State:
+├─ Plan: Basic
+├─ Limit: 100
+├─ Used: 75
+└─ Remaining: 25
 
-### 9A: Glowing Button for Exhausted Generations
-1.  **Frontend (`Profile.tsx`)**: Checks if `generations_used >= generation_limit`.
-2.  **Frontend**: If true, applies glowing animation to "Manage Billing" button:
-    *   `animate-pulse` for pulsing effect
-    *   `ring-2 ring-brand-green/50` for glowing ring
-    *   Changes text to "Upgrade Plan - No Generations Left!"
-3.  **Frontend**: User clicks glowing button and is directed to plan selection.
+Upgrade Process:
+├─ New Plan: Pro (500 base limit)
+├─ Preserved Generations: 25
+├─ New Total Limit: 525 (500 + 25)
+└─ New Usage Count: 25 (preserves remaining as "used")
 
-### 9B: Smart Plan Selection Dialog
-1.  **Frontend**: Opens plan selection modal based on current user plan.
-2.  **Frontend**: Shows appropriate plans with:
-    *   Current plan highlighted with badge
-    *   Upgrade/renewal options clearly labeled
-    *   Feature comparisons and pricing
-3.  **Frontend**: Handles plan selection and checkout initiation.
+Final State:
+├─ Plan: Pro
+├─ Limit: 525
+├─ Used: 25
+└─ Available: 500 (effective new generations)
+```
 
-These enhanced flows illustrate the sophisticated interplay between user interface, authentication systems, subscription management, and generation preservation, creating a fair and user-friendly billing system while maintaining data integrity and providing excellent user experience. 
+## 5. Admin System Data Flows *(NEW)*
+
+### 5.1. Admin Dashboard Overview
+
+```
+1. Admin Dashboard Access
+   ├─ Frontend: /admin route
+   ├─ AdminAuthGuard verification
+   ├─ Admin dashboard load
+   └─ Multiple data requests in parallel:
+      ├─ Platform metrics
+      ├─ User analytics
+      ├─ Recent user activity
+      └─ System status
+
+2. Admin Data Fetching
+   ├─ Frontend: AdminOverview.tsx
+   ├─ Edge Function: admin-operations
+   ├─ Action: get_analytics
+   ├─ Database Views:
+   │  ├─ admin_user_overview
+   │  └─ admin_user_analytics
+   └─ Aggregated Response to Frontend
+```
+
+### 5.2. User Management Operations
+
+#### User List with Pagination
+```
+1. User List Request
+   ├─ Frontend: UserManagement.tsx
+   ├─ Search/Filter Parameters
+   ├─ Pagination Settings
+   └─ Edge Function Call: admin-operations
+
+2. Admin Operations Processing
+   ├─ JWT Authentication Verification
+   ├─ Admin Authorization Check: is_admin()
+   ├─ Database Query: admin_user_overview view
+   ├─ Search Filters Applied:
+   │  ├─ Email/Name Search (ILIKE)
+   │  └─ Plan Filter (exact match)
+   ├─ Pagination Applied:
+   │  ├─ OFFSET calculation
+   │  ├─ LIMIT application
+   │  └─ Total count
+   └─ Structured Response with pagination metadata
+
+3. Frontend Update
+   ├─ User List State Update
+   ├─ Pagination Controls Update
+   └─ Loading State Management
+```
+
+#### User Plan Updates
+```
+1. Plan Update Request
+   ├─ Frontend: EditUserModal (UserManagement.tsx)
+   ├─ Form Data Collection:
+   │  ├─ planId ('free' | 'basic' | 'pro')
+   │  └─ generationLimit (number)
+   ├─ Edge Function: admin-operations
+   └─ Action: update_user_plan
+
+2. Secure Plan Update Processing
+   ├─ Admin Authorization Verification
+   ├─ User ID Resolution:
+   │  ├─ Convert user_id string to UUID
+   │  └─ Database lookup for actual UUID
+   ├─ Database Function Call: update_user_plan()
+   │  ├─ Plan assignment
+   │  ├─ Generation limit setting
+   │  └─ Usage counter reset
+   ├─ Audit Logging
+   └─ Success Response
+
+3. Frontend State Synchronization
+   ├─ User List Update
+   ├─ Modal Close
+   ├─ Toast Notification
+   └─ UI Refresh
+```
+
+#### User Deletion
+```
+1. Delete Request
+   ├─ Frontend: Confirmation Dialog
+   ├─ Edge Function: admin-operations
+   └─ Action: delete_user
+
+2. Cascade Deletion Processing
+   ├─ Admin Authorization Check
+   ├─ Related Data Deletion:
+   │  ├─ lab_results (user's uploads)
+   │  └─ subscriptions (billing data)
+   ├─ User Record Deletion
+   ├─ Audit Logging
+   └─ Success Response
+
+3. Frontend Cleanup
+   ├─ User List Refresh
+   ├─ Success Notification
+   └─ UI State Update
+```
+
+### 5.3. Analytics and Reporting
+
+#### Platform Metrics Flow
+```
+1. Metrics Request
+   ├─ Frontend: AdminOverview.tsx
+   ├─ Edge Function: admin-operations
+   └─ Action: get_analytics (type: platform_metrics)
+
+2. Data Aggregation
+   ├─ User Statistics:
+   │  ├─ Total users count
+   │  ├─ Plan distribution (free/basic/pro)
+   │  └─ Active subscribers count
+   ├─ Upload Statistics:
+   │  └─ Total lab results processed
+   └─ Real-time Calculation
+
+3. Response and Display
+   ├─ Structured metrics object
+   ├─ Frontend: Metrics cards display
+   └─ Visual indicators and trends
+```
+
+#### User Growth Analytics
+```
+1. Growth Data Request
+   ├─ Frontend: Analytics section
+   ├─ Time period selection (week/month/year)
+   └─ Edge Function: admin-operations
+
+2. Database View Query
+   ├─ admin_user_analytics view
+   ├─ Date range filtering
+   ├─ Registration metrics:
+   │  ├─ Daily user registrations
+   │  └─ Plan distribution by date
+   └─ Ordered by date (newest first)
+
+3. Frontend Visualization
+   ├─ Chart/Graph rendering
+   ├─ Trend analysis
+   └─ Growth indicators
+```
+
+## 6. File Upload and Processing Flows
+
+### 6.1. COA Upload Process
+
+```
+1. File Selection and Validation
+   ├─ Frontend: Upload.tsx
+   ├─ Client-side validation:
+   │  ├─ File type (PDF only)
+   │  ├─ File size (max 1MB)
+   │  └─ User generation limit check
+   └─ Upload initiation
+
+2. File Upload to Storage
+   ├─ Supabase Storage: labresults bucket
+   ├─ File path: {user_id}/{timestamp}-{filename}
+   ├─ Storage policies: User-specific access
+   └─ Upload confirmation
+
+3. Database Record Creation
+   ├─ Insert into lab_results table:
+   │  ├─ user_id (FK to auth.users)
+   │  ├─ file_name
+   │  ├─ storage_path
+   │  └─ status: 'pending'
+   ├─ Increment user generations_used
+   └─ Update status to 'processing'
+
+4. AI Processing (Edge Function)
+   ├─ process-lab-result function invocation
+   ├─ PDF text extraction
+   ├─ AI/LLM analysis
+   ├─ Description generation
+   └─ Database update: status → 'completed'
+
+5. Result Polling and Display
+   ├─ Frontend: Polling mechanism (3-second intervals)
+   ├─ Status check: lab_results table
+   ├─ Description retrieval when completed
+   └─ UI update with results
+```
+
+## 7. Data Security and Access Control
+
+### 7.1. Row Level Security (RLS) Implementation
+
+```
+Database Table Access Control:
+
+users table:
+├─ User Access: auth.uid() = id (own records only)
+├─ Service Role: Full access (admin operations)
+└─ Triggers: Auto-creation on auth events
+
+subscriptions table:
+├─ User Access: user_id = auth.uid()::text (own subscriptions)
+├─ Service Role: Full access (webhook processing)
+└─ Admin Access: Via service role only
+
+lab_results table:
+├─ User Access: auth.uid() = user_id (own uploads)
+├─ Service Role: Full access (processing functions)
+└─ CRUD Operations: User-scoped only
+
+Admin Views:
+├─ admin_user_overview: Service role access only
+├─ admin_user_analytics: Service role access only
+└─ No direct user access (admin functions only)
+```
+
+### 7.2. Authentication Layers
+
+```
+Security Stack:
+
+1. Frontend Authentication
+   ├─ JWT Token Validation
+   ├─ Route Protection (PrivateRoute)
+   ├─ Admin Route Protection (AdminAuthGuard)
+   └─ Session Management
+
+2. Edge Function Security
+   ├─ CORS Configuration
+   ├─ Authorization Header Validation
+   ├─ Admin Role Verification
+   └─ Input Validation and Sanitization
+
+3. Database Security
+   ├─ Row Level Security Policies
+   ├─ Function Security (SECURITY DEFINER)
+   ├─ Service Role Access Control
+   └─ Admin Function Restrictions
+
+4. API Security
+   ├─ Stripe Webhook Signature Verification
+   ├─ Rate Limiting (planned)
+   ├─ Environment Variable Protection
+   └─ Error Information Filtering
+```
+
+## 8. Error Handling and Recovery
+
+### 8.1. Frontend Error Handling
+
+```
+Error Handling Strategy:
+
+1. User Interface Errors
+   ├─ Form Validation Messages
+   ├─ Toast Notifications for Actions
+   ├─ Loading States and Indicators
+   └─ Graceful Degradation
+
+2. API Communication Errors
+   ├─ Network Error Handling
+   ├─ Timeout Management
+   ├─ Retry Logic (where appropriate)
+   └─ User-Friendly Error Messages
+
+3. Admin Interface Errors
+   ├─ Operation Failure Notifications
+   ├─ Validation Error Display
+   ├─ Rollback Capability (where applicable)
+   └─ Detailed Error Logging
+```
+
+### 8.2. Backend Error Recovery
+
+```
+Edge Function Error Handling:
+
+1. Webhook Processing
+   ├─ Signature Verification Failures
+   ├─ Database Operation Failures
+   ├─ Fallback Mechanisms (SQL functions)
+   └─ Stripe Retry Prevention (200 responses)
+
+2. Admin Operations
+   ├─ Authorization Failures
+   ├─ Database Query Errors
+   ├─ Data Type Mismatches
+   └─ Comprehensive Error Logging
+
+3. Payment Processing
+   ├─ Customer Creation Failures
+   ├─ Checkout Session Errors
+   ├─ Plan Resolution Issues
+   └─ Generation Preservation Failures
+```
+
+## 9. Performance Optimization Flows
+
+### 9.1. Caching Strategies
+
+```
+Frontend Caching:
+├─ Plan Data: localStorage (24 hours)
+├─ User Session: Persistent storage
+├─ Admin Data: Component-level state
+└─ Query Results: Short-term memory cache
+
+Backend Optimization:
+├─ Database Views: Pre-computed admin data
+├─ Indexes: Strategic indexing on query columns
+├─ Connection Pooling: Built-in Supabase management
+└─ Edge Function Cold Start: Minimal dependencies
+```
+
+### 9.2. Database Query Optimization
+
+```
+Optimized Query Patterns:
+
+1. Admin User Queries
+   ├─ Selective Field Selection
+   ├─ Indexed Column Filtering
+   ├─ Proper Pagination with OFFSET/LIMIT
+   └─ Efficient JOIN Operations in Views
+
+2. Analytics Queries
+   ├─ Pre-computed Views
+   ├─ Date-based Indexing
+   ├─ Aggregation Optimization
+   └─ Result Set Limiting
+
+3. Real-time Operations
+   ├─ Single-row Updates
+   ├─ Atomic Transactions
+   ├─ Minimal Data Transfer
+   └─ Efficient Status Polling
+```
+
+## 10. Monitoring and Observability
+
+### 10.1. Application Monitoring
+
+```
+Frontend Monitoring:
+├─ Error Boundary Components
+├─ Performance Metrics (planned)
+├─ User Action Tracking
+└─ Admin Operation Logging
+
+Backend Monitoring:
+├─ Edge Function Logs (Supabase Dashboard)
+├─ Database Performance Metrics
+├─ Webhook Success/Failure Rates
+└─ Admin Action Audit Trail
+```
+
+### 10.2. Data Integrity Monitoring
+
+```
+Data Consistency Checks:
+├─ User-Subscription Relationship Integrity
+├─ Generation Count Accuracy
+├─ Plan Assignment Validation
+└─ Admin Operation Success Verification
+
+Health Checks:
+├─ Database Connection Status
+├─ Edge Function Availability
+├─ Stripe Integration Status
+└─ Authentication Service Health
+```
+
+This comprehensive data flow documentation ensures understanding of all system interactions, from basic user operations to complex admin management tasks, providing a complete picture of how data moves through the StrainInsights application ecosystem. 

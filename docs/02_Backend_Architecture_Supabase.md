@@ -8,10 +8,11 @@ Supabase provides the core backend services for the application, including datab
 
 ## 2. Supabase Services Used
 
--   **PostgreSQL Database**: For storing application data such as user profiles, lab result metadata, and subscription details.
+-   **PostgreSQL Database**: For storing application data such as user profiles, lab result metadata, subscription details, and admin analytics.
 -   **Authentication**: Manages user sign-up, login, and session management with support for email/password and Google OAuth.
 -   **Storage**: Used for storing uploaded PDF files (Certificates of Analysis).
 -   **Edge Functions**: Serverless TypeScript functions for handling business logic that requires a secure environment or interaction with third-party services like Stripe and AI models.
+-   **Row Level Security (RLS)**: Database-level access control ensuring users can only access their own data.
 
 ## 3. Database Schema
 
@@ -22,18 +23,25 @@ Key tables in the Supabase PostgreSQL database:
 This table stores information about registered users, extending the default Supabase `auth.users` table with subscription and usage tracking.
 
 -   `id` (UUID, Primary Key, Foreign Key to `auth.users.id`): Supabase Auth User ID.
+-   `user_id` (TEXT, NOT NULL): String representation of auth user ID for compatibility.
 -   `email` (TEXT): User's email address (can be synced or duplicated from `auth.users`).
+-   `name` (TEXT, Nullable): User's display name.
+-   `full_name` (TEXT, Nullable): User's full name.
+-   `avatar_url` (TEXT, Nullable): URL to user's profile picture.
+-   `token_identifier` (TEXT, Nullable): Additional token for identification.
 -   `stripe_customer_id` (TEXT, Nullable): Stripe Customer ID for managing subscriptions.
 -   `current_plan_id` (TEXT, Default: 'free'): The current plan identifier:
     -   `'free'`: Free plan (default for new users)
-    -   `'basic'`: Basic plan ($39/month, 30 generations)
-    -   `'pro'`: Pro plan ($99/month, 100 generations)
+    -   `'basic'`: Basic plan ($39/month, 100 generations)
+    -   `'pro'`: Pro plan ($99/month, 500 generations)
 -   `subscription_status` (TEXT, Nullable): Status of the user's Stripe subscription (e.g., `active`, `canceled`, `past_due`, `trialing`).
 -   `generations_used` (INTEGER, Default: 0): Number of COA processing generations used by the user in the current billing cycle.
--   `generation_limit` (INTEGER, Default: 10): The maximum number of generations allowed for the user based on their plan:
-    -   Free plan: 10 generations
-    -   Basic plan: 30 generations  
-    -   Pro plan: 100 generations
+-   `generation_limit` (INTEGER, Default: 1): The maximum number of generations allowed for the user based on their plan:
+    -   Free plan: 1 generation
+    -   Basic plan: 100 generations  
+    -   Pro plan: 500 generations
+-   `operations_available` (INTEGER, Default: 1): Number of operations available to user based on subscription plan.
+-   `operations_used` (INTEGER, Default: 0): Number of operations used by user in current billing cycle.
 -   `created_at` (TIMESTAMPTZ, Default: `now()`)
 -   `updated_at` (TIMESTAMPTZ, Default: `now()`)
 
@@ -42,108 +50,417 @@ This table stores information about registered users, extending the default Supa
 - **Smart Status Management**: Account status determination based on plan type and subscription status
 - **Plan Migration Support**: Seamless transitions between plan tiers
 
-### 3.2. `subscriptions` Table (New)
+### 3.2. `subscriptions` Table
 
 Stores detailed subscription information linked to Stripe subscriptions.
 
 -   `id` (UUID, Primary Key, Default: `gen_random_uuid()`)
--   `user_id` (UUID, Foreign Key to `users.id`): The user who owns this subscription
--   `stripe_subscription_id` (TEXT, Unique): Stripe subscription ID
--   `stripe_customer_id` (TEXT): Stripe customer ID
--   `status` (TEXT): Current subscription status from Stripe
+-   `user_id` (TEXT, Foreign Key to `users.user_id`): The user who owns this subscription
+-   `stripe_id` (TEXT, UNIQUE): Stripe Subscription ID
+-   `status` (TEXT): Current subscription status (`active`, `canceled`, `past_due`, etc.)
+-   `price_id` (TEXT): Stripe Price ID associated with this subscription
 -   `current_period_start` (TIMESTAMPTZ): Start of current billing period
 -   `current_period_end` (TIMESTAMPTZ): End of current billing period
--   `plan_id` (TEXT): Associated plan identifier
+-   `cancel_at_period_end` (BOOLEAN, Default: false): Whether subscription will cancel at period end
+-   `metadata` (JSONB): Additional metadata from Stripe
 -   `created_at` (TIMESTAMPTZ, Default: `now()`)
 -   `updated_at` (TIMESTAMPTZ, Default: `now()`)
 
 ### 3.3. `lab_results` Table
 
-Stores metadata and results for uploaded Certificates of Analysis (COAs).
+Stores metadata and processing results for uploaded Certificate of Analysis (COA) files.
 
--   `id` (UUID, Primary Key, Default: `gen_random_uuid()`): Unique identifier for the lab result record.
--   `user_id` (UUID, Foreign Key to `auth.users.id`): The user who uploaded the COA.
--   `file_name` (TEXT): Original name of the uploaded PDF file.
--   `storage_path` (TEXT): Path to the PDF file in Supabase Storage (e.g., `public/labresults/<user_id>/<timestamp>-<filename>`).
--   `status` (TEXT, Default: `'pending'`): Processing status of the COA. Possible values:
-    -   `pending`: File uploaded, awaiting processing.
-    -   `processing`: Edge Function is currently analyzing the COA.
-    -   `completed`: Processing finished successfully, description available.
-    -   `error`: An error occurred during processing.
--   `description` (TEXT, Nullable): The AI-generated description/analysis of the COA.
--   `raw_text` (TEXT, Nullable): Raw text extracted from the PDF (optional, for debugging or future use).
+-   `id` (UUID, Primary Key, Default: `gen_random_uuid()`)
+-   `user_id` (UUID, Foreign Key to `auth.users.id`): The user who uploaded the file
+-   `file_name` (TEXT): Original filename of the uploaded file
+-   `storage_path` (TEXT): Path in Supabase Storage where the file is stored
+-   `status` (TEXT, Default: 'pending'): Processing status ('pending', 'processing', 'completed', 'error')
+-   `description` (TEXT, Nullable): AI-generated analysis/description of the COA
+-   `raw_text` (TEXT, Nullable): Extracted text content from the PDF
 -   `created_at` (TIMESTAMPTZ, Default: `now()`)
 -   `updated_at` (TIMESTAMPTZ, Default: `now()`)
 
-*Note: Row Level Security (RLS) policies are crucial for these tables to ensure users can only access and modify their own data.*
+### 3.4. Admin Database Views *(NEW)*
 
-## 4. Authentication (Enhanced)
+#### 3.4.1. `admin_user_overview` View
+Comprehensive user overview for admin dashboard:
 
-**Multi-Provider Authentication System:**
+```sql
+CREATE OR REPLACE VIEW admin_user_overview AS
+SELECT 
+  u.id,
+  u.user_id,
+  u.email,
+  u.full_name,
+  u.current_plan_id,
+  u.generation_limit,
+  u.generations_used,
+  u.subscription_status,
+  u.created_at,
+  s.current_period_end,
+  COALESCE(lr.total_uploads, 0) as total_uploads
+FROM users u
+LEFT JOIN subscriptions s ON u.user_id = s.user_id
+LEFT JOIN (
+  SELECT user_id, COUNT(*) as total_uploads 
+  FROM lab_results 
+  GROUP BY user_id
+) lr ON u.id = lr.user_id
+ORDER BY u.created_at DESC;
+```
 
--   **Email/Password Authentication**: Traditional authentication flow
--   **Google OAuth**: Seamless Google sign-in integration
-    -   Configured in Supabase Dashboard → Authentication → Providers
-    -   Automatic user profile creation on first sign-in
-    -   Redirect to `/upload` after successful authentication
+#### 3.4.2. `admin_user_analytics` View
+Daily user registration analytics:
 
--   **Session Management**: 
-    -   The `src/supabase/auth.tsx` file provides a React context (`AuthProvider`)
-    -   Manages user sessions and authentication status
-    -   Supports multiple authentication methods through unified interface
+```sql
+CREATE OR REPLACE VIEW admin_user_analytics AS
+SELECT 
+  DATE(created_at) as registration_date,
+  COUNT(*) as users_registered,
+  COUNT(*) FILTER (WHERE current_plan_id = 'free') as free_users,
+  COUNT(*) FILTER (WHERE current_plan_id = 'basic') as basic_users,
+  COUNT(*) FILTER (WHERE current_plan_id = 'pro') as pro_users
+FROM users 
+WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY DATE(created_at)
+ORDER BY registration_date DESC;
+```
 
--   **Security**: RLS policies in the database are tied to `auth.uid()` to enforce data access rules.
+## 4. Database Functions
 
-## 5. Storage
+### 4.1. User Management Functions
 
--   Supabase Storage is used to store the PDF files (COAs) uploaded by users.
--   A bucket named `labresults` is used.
--   Files are stored with a path structure like `<user_id>/<timestamp>-<filename>.pdf` to ensure uniqueness and organization.
--   Access to files in the bucket is controlled by Storage policies, typically allowing authenticated users to upload and read their own files.
--   The frontend uploads files directly to this bucket after the user selects a file.
+#### 4.1.1. `handle_new_user()` Trigger Function
+Automatically creates user records when new users register:
 
-## 6. Edge Functions (Enhanced)
+```sql
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.users (
+    id,
+    user_id,
+    email,
+    name,
+    full_name,
+    avatar_url,
+    token_identifier,
+    created_at,
+    updated_at,
+    current_plan_id,
+    generation_limit,
+    generations_used
+  ) VALUES (
+    NEW.id,
+    NEW.id::text,
+    NEW.email,
+    NEW.raw_user_meta_data->>'name',
+    NEW.raw_user_meta_data->>'full_name',
+    NEW.raw_user_meta_data->>'avatar_url',
+    NEW.email,
+    NEW.created_at,
+    NEW.updated_at,
+    'free',  -- Default 'free' plan
+    1,       -- Default limit of 1 for free tier
+    0        -- Start with 0 generations used
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
 
-Serverless TypeScript functions deployed on Supabase with enhanced subscription management capabilities.
+#### 4.1.2. `handle_user_update()` Trigger Function
+Syncs user profile updates from auth.users to users table:
 
--   **Location**: Stored in the `supabase/functions/` directory in the project.
--   **Deployment**: Deployed via the Supabase CLI (`supabase functions deploy <function_name>`).
--   **Invocation**: Called from the frontend client using `supabase.functions.invoke('<function_name>', { body: ... })`.
+```sql
+CREATE OR REPLACE FUNCTION public.handle_user_update()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE public.users
+  SET
+    email = NEW.email,
+    name = NEW.raw_user_meta_data->>'name',
+    full_name = NEW.raw_user_meta_data->>'full_name',
+    avatar_url = NEW.raw_user_meta_data->>'avatar_url',
+    updated_at = NEW.updated_at
+  WHERE user_id = NEW.id::text;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
 
-### Key Edge Functions:
+### 4.2. Admin Functions *(NEW)*
 
-#### 6.1. Subscription Management Functions
+#### 4.2.1. `is_admin(user_email)` Function
+Determines if a user has admin privileges:
 
--   **`get-plans`**: Retrieves active pricing plans from Stripe
-    -   Returns plan details with correct pricing: Basic ($39), Pro ($99)
-    -   Includes plan features and generation limits
-    -   Cached on frontend for performance
+```sql
+CREATE OR REPLACE FUNCTION is_admin(user_email TEXT)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN user_email IN (
+    'tim@useheady.com',
+    'takshitmathur1201@gmail.com',
+    'admin@straininsights.com',
+    'ryan@useheady.com'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
 
--   **`create-checkout`**: Creates Stripe Checkout Sessions
-    -   Handles multiple plan types (Basic/Pro)
-    -   Supports upgrade and renewal flows
-    -   Includes user metadata for webhook processing
-    -   Enables promotion codes for discounts
+#### 4.2.2. `update_user_plan(user_id_param, plan_id_param, limit_param)` Function
+Handles admin user plan updates with proper type handling:
 
--   **`payments-webhook`**: Enhanced Stripe webhook handler
-    -   **Generation Preservation Logic**: Preserves unused generations when upgrading/renewing
-    -   **Smart Plan Updates**: Distinguishes between new subscriptions, renewals, and upgrades
-    -   **Status Management**: Updates user subscription status and plan information
-    -   **Event Handling**: Processes multiple Stripe events:
-        - `checkout.session.completed`: New subscription activation
-        - `customer.subscription.updated`: Plan changes and renewals
-        - `customer.subscription.deleted`: Cancellations and downgrades
-        - `invoice.payment_succeeded`: Successful payments
-        - `invoice.payment_failed`: Failed payments
+```sql
+CREATE OR REPLACE FUNCTION public.update_user_plan(
+  user_id_param UUID,
+  plan_id_param TEXT,
+  limit_param INTEGER
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  row_count INTEGER;
+BEGIN
+  -- Log the operation for debugging
+  RAISE NOTICE 'Updating user % with plan % and limit %', user_id_param, plan_id_param, limit_param;
+  
+  -- Update user plan details
+  UPDATE public.users
+  SET 
+    current_plan_id = plan_id_param,
+    generation_limit = limit_param,
+    generations_used = 0, -- Reset usage counter
+    updated_at = NOW()
+  WHERE id = user_id_param;
+  
+  -- Check if update was successful
+  GET DIAGNOSTICS row_count = ROW_COUNT;
+  
+  -- Return success status (true if any rows were updated)
+  RETURN row_count > 0;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
 
-#### 6.2. COA Processing Functions
+### 4.3. Operational Functions
 
--   **`process-lab-result` / `process-lab-result-long`**: The core COA processing functions. They:
-    -   Are triggered after a file is uploaded and its metadata is saved.
-    -   Fetch the PDF from Supabase Storage.
-    -   Extract text from the PDF.
-    -   Call external AI/LLM service to generate description/analysis.
-    -   Update the corresponding record in the `lab_results` table with the generated `description` and set `status` to `'completed'` or `'error'`.
+#### 4.3.1. `reset_operations_monthly()` Function
+Monthly reset of user operations (scheduled via cron):
+
+```sql
+CREATE OR REPLACE FUNCTION reset_operations_monthly()
+RETURNS VOID AS $$
+BEGIN
+  UPDATE public.users
+  SET operations_used = 0,
+      updated_at = NOW()
+  WHERE operations_used > 0;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+## 5. Row Level Security (RLS) Policies
+
+### 5.1. `users` Table Policies
+```sql
+-- Enable RLS
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- Users can view and update their own records
+CREATE POLICY "Users can view own profile" ON users
+  FOR SELECT USING (auth.uid() = id);
+
+CREATE POLICY "Users can update own profile" ON users
+  FOR UPDATE USING (auth.uid() = id);
+```
+
+### 5.2. `lab_results` Table Policies
+```sql
+-- Enable RLS
+ALTER TABLE lab_results ENABLE ROW LEVEL SECURITY;
+
+-- Users can only access their own lab results
+CREATE POLICY "Users can view own lab results" ON lab_results
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own lab results" ON lab_results
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+```
+
+### 5.3. `subscriptions` Table Policies
+```sql
+-- Enable RLS
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+
+-- Users can view their own subscriptions
+CREATE POLICY "Users can view own subscriptions" ON subscriptions
+  FOR SELECT USING (user_id = auth.uid()::text);
+```
+
+## 6. Edge Functions Architecture
+
+### 6.1. Overview
+Edge Functions provide serverless execution environment for business logic requiring:
+- Secure API key handling
+- Third-party service integration
+- Database operations with elevated privileges
+- Webhook processing
+
+### 6.2. Function Deployment Structure
+```
+supabase/functions/
+├── get-plans/
+│   └── index.ts
+├── create-checkout/
+│   └── index.ts
+├── payments-webhook/
+│   └── index.ts
+└── admin-operations/      ← NEW
+    └── index.ts
+```
+
+### 6.3. Edge Function Details
+
+#### 6.3.1. `get-plans`
+**Purpose**: Fetch active Stripe pricing plans for frontend display
+
+**Features**:
+- Retrieves live Stripe pricing data
+- Expands product information
+- Handles rate limiting and error states
+- Returns structured plan data
+
+**Response Format**:
+```typescript
+interface PlanResponse {
+  id: string;
+  object: string;
+  active: boolean;
+  currency: string;
+  unit_amount: number;
+  product: {
+    id: string;
+    name: string;
+    description?: string;
+  };
+}
+```
+
+#### 6.3.2. `create-checkout`
+**Purpose**: Generate Stripe Checkout Sessions for subscriptions
+
+**Features**:
+- Creates/retrieves Stripe customers
+- Handles subscription checkout sessions
+- Embeds user metadata for webhook processing
+- Supports promotion codes
+- Configures success/cancel URLs
+
+**Request Format**:
+```typescript
+interface CheckoutRequest {
+  priceId: string;
+  userId: string;
+  userEmail: string;
+  returnUrlPath?: string;
+}
+```
+
+#### 6.3.3. `payments-webhook`
+**Purpose**: Process Stripe webhook events for subscription management
+
+**Supported Events**:
+- `checkout.session.completed`: New subscription activation
+- `customer.subscription.updated`: Plan changes and renewals  
+- `customer.subscription.deleted`: Subscription cancellations
+
+**Enhanced Generation Preservation Logic**:
+```typescript
+// Preserve unused generations when upgrading
+const { data: currentUserData } = await supabaseClient
+  .from('users')
+  .select('current_plan_id, generation_limit, generations_used')
+  .eq('id', userToUpdate.id)
+  .single();
+
+let newGenerationLimit = generationLimit;
+if (currentUserData && currentUserData.generations_used < currentUserData.generation_limit) {
+  const unusedGenerations = currentUserData.generation_limit - currentUserData.generations_used;
+  newGenerationLimit = generationLimit + unusedGenerations;
+}
+```
+
+#### 6.3.4. `admin-operations` *(NEW)*
+**Purpose**: Handle all admin-related database operations with secure service role access
+
+**Supported Operations**:
+
+**Update User Plan**:
+```typescript
+interface UpdateUserPlanRequest {
+  action: 'update_user_plan';
+  userId: string;
+  planId: 'free' | 'basic' | 'pro';
+  generationLimit: number;
+}
+```
+
+**Delete User**:
+```typescript
+interface DeleteUserRequest {
+  action: 'delete_user';
+  userId: string;
+}
+```
+
+**Get Users (with pagination)**:
+```typescript
+interface GetUsersRequest {
+  action: 'get_users';
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  planFilter?: string;
+}
+```
+
+**Get Analytics**:
+```typescript
+interface GetAnalyticsRequest {
+  action: 'get_analytics';
+  type: 'user_growth' | 'revenue' | 'platform_metrics';
+  period?: 'week' | 'month' | 'year';
+}
+```
+
+**Security Implementation**:
+```typescript
+// Verify admin status before any operation
+const { data: isAdminData, error: adminError } = await supabase.rpc('is_admin', {
+  user_email: user.email
+});
+
+if (adminError || !isAdminData) {
+  throw new Error('Insufficient permissions');
+}
+```
+
+**Data Type Handling**:
+```typescript
+// Convert user_id string to UUID for database functions
+const { data: userData, error: userError } = await supabase
+  .from('users')
+  .select('id')
+  .eq('user_id', userId)
+  .single();
+
+// Use UUID for database function calls
+const { data, error } = await supabase.rpc('update_user_plan', {
+  user_id_param: userData.id,  // UUID instead of string
+  plan_id_param: planId,
+  limit_param: generationLimit
+});
+```
 
 ## 7. Enhanced Subscription Management
 
@@ -155,10 +472,10 @@ Serverless TypeScript functions deployed on Supabase with enhanced subscription 
 - **Upgrades**: User gets new plan limit + unused generations from previous plan
 - **Downgrades**: User gets new plan limit (excess generations preserved up to new limit)
 
-**Implementation:**
+**Implementation Example:**
 ```sql
--- Example: User with Basic plan (30 limit, 29 used = 1 remaining) upgrades to Pro
--- Result: 100 (Pro limit) + 1 (unused) = 101 total generations
+-- Example: User with Basic plan (100 limit, 95 used = 5 remaining) upgrades to Pro
+-- Result: 500 (Pro limit) + 5 (unused) = 505 total generations
 ```
 
 ### 7.2. Account Status Logic
@@ -176,7 +493,38 @@ Serverless TypeScript functions deployed on Supabase with enhanced subscription 
 - Maintains data consistency during subscription changes
 - Supports rollback on errors
 
-## 8. Environment Variables
+## 8. Admin System Database Architecture *(NEW)*
+
+### 8.1. Admin Access Control
+- **Role Verification**: `is_admin(user_email)` function checks against approved admin emails
+- **Service Role Operations**: Admin Edge Function uses service role key to bypass RLS
+- **Audit Trail**: All admin operations logged for security tracking
+
+### 8.2. Admin Data Views
+- **`admin_user_overview`**: Comprehensive user data for management interface
+- **`admin_user_analytics`**: Daily registration metrics for analytics dashboard
+- **Real-time Queries**: Direct database access for up-to-date admin information
+
+### 8.3. Admin Operation Types
+
+**User Management**:
+- View all users with pagination and filtering
+- Update user plans and generation limits
+- Delete user accounts (with cascade deletion of related data)
+- Search users by email or name
+
+**Analytics**:
+- User growth tracking
+- Plan distribution metrics
+- Revenue analytics
+- Platform usage statistics
+
+**Platform Management**:
+- System-wide settings
+- Admin user management
+- Operational controls
+
+## 9. Environment Variables
 
 Enhanced environment configuration for production deployment:
 
@@ -185,50 +533,53 @@ Enhanced environment configuration for production deployment:
 -   `STRIPE_WEBHOOK_SECRET`: **Live** Stripe webhook signing secret
 -   `VITE_STRIPE_PUBLISHABLE_KEY`: **Live** Stripe publishable key
 
-**AI Service Configuration:**
--   `OPENAI_API_KEY`: API key for AI service used in COA processing
-
 **Supabase Configuration:**
--   `VITE_SUPABASE_URL`: Supabase project URL
--   `VITE_SUPABASE_ANON_KEY`: Supabase anonymous key
--   Auto-configured within Supabase environment for Edge Functions
+-   `SUPABASE_URL`: Project URL
+-   `SUPABASE_ANON_KEY`: Anonymous key for client-side operations
+-   `SUPABASE_SERVICE_ROLE_KEY`: Service role key for Edge Functions and admin operations
 
-**OAuth Configuration:**
--   Google OAuth credentials configured in Supabase Dashboard
--   No additional environment variables needed for frontend
+**AI Service Configuration:**
+-   AI processing service API keys and endpoints (implementation-specific)
 
-## 9. Security Considerations
+## 10. Backup and Disaster Recovery
 
-**Enhanced Security Measures:**
+### 10.1. Database Backups
+-   **Automated Daily Backups**: Supabase provides automatic daily backups
+-   **Point-in-Time Recovery**: Available for Pro and Team plans
+-   **Export Capabilities**: Manual database exports for additional backup
 
--   **Row Level Security (RLS)**: Implemented on all tables (`users`, `subscriptions`, `lab_results`) to ensure users can only access their own data.
--   **Storage Policies**: Configured for the `labresults` bucket to control file access.
--   **Environment Variable Management**: All API keys and secrets stored securely as environment variables.
--   **Webhook Security**: Stripe webhook endpoints verify signatures using live webhook secrets.
--   **Input Validation**: Edge Functions validate all inputs received from clients.
--   **OAuth Security**: Google OAuth configured with proper redirect URIs and scopes.
--   **Session Management**: Secure session handling with automatic token refresh.
+### 10.2. Code and Configuration Backup
+-   **Version Control**: All Edge Functions and migrations stored in Git
+-   **Environment Variables**: Securely stored in Supabase dashboard
+-   **Migration History**: Complete record of all database schema changes
 
-## 10. Recent Enhancements
+## 11. Performance Optimization
 
-### 10.1. Subscription System Improvements
-- Generation preservation across plan changes
-- Smart status management based on plan types
-- Enhanced webhook processing for complex subscription scenarios
+### 11.1. Database Optimization
+- **Indexes**: Strategic indexing on frequently queried columns
+- **Views**: Pre-computed admin views for faster dashboard loading
+- **Connection Pooling**: Built-in Supabase connection management
 
-### 10.2. Authentication Enhancements
-- Google OAuth integration with seamless user experience
-- Multi-provider authentication support
-- Improved session management and security
+### 11.2. Edge Function Optimization
+- **Cold Start Management**: Minimal dependencies for faster startup
+- **Caching**: Strategic caching of frequently accessed data
+- **Error Handling**: Comprehensive error management for reliability
 
-### 10.3. Database Schema Updates
-- Added `subscriptions` table for detailed subscription tracking
-- Enhanced `users` table with improved plan management
-- Added SQL functions for atomic plan updates
+## 12. Security Considerations
 
-### 10.4. Business Logic Improvements
-- Fair billing system that preserves user value
-- Clear account status determination
-- Support for complex subscription scenarios (upgrades, downgrades, renewals)
+### 12.1. Authentication Security
+-   **JWT Tokens**: Secure session management with automatic refresh
+-   **OAuth Integration**: Secure Google authentication flow
+-   **Session Storage**: Secure client-side session persistence
 
-This architecture leverages Supabase's integrated services to provide a robust and scalable backend with enhanced subscription management capabilities and minimal operational overhead. The recent improvements focus on creating a fair, user-friendly billing system while maintaining data integrity and security. 
+### 12.2. Database Security
+-   **Row Level Security**: Comprehensive RLS policies for all tables
+-   **Function Security**: SECURITY DEFINER for elevated privilege operations
+-   **Admin Access Control**: Multi-layer admin verification system
+
+### 12.3. API Security
+-   **CORS Configuration**: Proper cross-origin resource sharing setup
+-   **Rate Limiting**: Built-in Supabase rate limiting for Edge Functions
+-   **Input Validation**: Comprehensive validation in all Edge Functions
+
+This backend architecture provides a robust, scalable foundation for the StrainInsights application, with comprehensive admin capabilities, secure subscription management, and efficient data processing workflows. 

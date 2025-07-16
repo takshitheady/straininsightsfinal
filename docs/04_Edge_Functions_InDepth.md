@@ -1,330 +1,751 @@
-# Supabase Edge Functions: In-Depth
+# Edge Functions In-Depth
 
-This document provides a detailed look into the Supabase Edge Functions used in the StrainInsights application.
+This document provides a detailed analysis of the Supabase Edge Functions used in the StrainInsights application, including the comprehensive admin operations system.
 
-Edge Functions are serverless TypeScript functions that run on Deno. They are used for backend logic, interacting with third-party APIs (like Stripe and AI services), and performing operations that require a secure environment.
+## 1. Overview
 
-## Common Setup for Edge Functions
+Edge Functions are serverless TypeScript functions that run on Supabase's global edge network. They provide secure environments for:
+- Payment processing and webhook handling
+- AI service integration
+- Admin operations with elevated privileges
+- Business logic requiring service role access
 
--   **Location**: `supabase/functions/<function-name>/index.ts`
--   **CORS Headers**: Most functions include CORS headers to allow requests from the frontend. A common pattern is:
-    ```typescript
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*', // Or your specific frontend domain for production
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    };
-    // ...
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { headers: corsHeaders });
-    }
-    ```
--   **Error Handling**: Functions typically include `try...catch` blocks to handle errors gracefully and return appropriate JSON responses with error messages and status codes.
--   **Stripe Client**: Functions interacting with Stripe initialize the Stripe SDK:
-    ```typescript
-    import Stripe from "https://esm.sh/stripe@<version>?target=deno";
+## 2. Function Architecture
+
+### 2.1. Deployment Structure
+
+```
+supabase/functions/
+├── get-plans/
+│   └── index.ts
+├── create-checkout/
+│   └── index.ts
+├── payments-webhook/
+│   └── index.ts
+└── admin-operations/      ← NEW ADMIN SYSTEM
+    └── index.ts
+```
+
+### 2.2. Common Patterns
+
+All Edge Functions follow consistent patterns:
+- **CORS Headers**: Proper cross-origin resource sharing
+- **Error Handling**: Comprehensive error management and logging
+- **Authentication**: JWT verification where required
+- **Input Validation**: Strict parameter validation
+- **Response Format**: Consistent JSON response structure
+
+### 2.3. Environment Variables
+
+**Required for all functions**:
+```typescript
+const supabaseUrl = Deno.env.get('SUPABASE_URL');
+const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+```
+
+**Payment functions**:
+```typescript
+const stripeSecretKey = Deno.env.get('STRIPE_SECRET_KEY');
+const stripeWebhookSecret = Deno.env.get('STRIPE_WEBHOOK_SECRET');
+```
+
+## 3. Function Details
+
+### 3.1. `get-plans` Function
+
+**Purpose**: Retrieve active Stripe pricing plans for frontend display
+
+**Key Features**:
+- Fetches live Stripe pricing data
+- Expands product information for detailed plan descriptions
+- Implements caching strategies
+- Handles rate limiting gracefully
+
+**Implementation**:
+```typescript
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import Stripe from "https://esm.sh/stripe@13.11.0";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
     const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', {
-        apiVersion: '2023-10-16', // Or your target API version
-        httpClient: Stripe.createFetchHttpClient(),
+      apiVersion: '2023-08-16',
     });
-    // Note: For production, STRIPE_SECRET_KEY must be the live secret key from Stripe.
-    ```
--   **Supabase Client**: For database interactions, functions might use the Supabase client, often with a service role key for elevated privileges if necessary.
 
-## 1. `get-plans` (Enhanced)
+    const prices = await stripe.prices.list({
+      active: true,
+      expand: ['data.product'],
+    });
 
--   **File**: `supabase/functions/get-plans/index.ts`
--   **Purpose**: To fetch active pricing plans from Stripe with enhanced plan details and correct pricing information.
--   **Trigger**: Called by the frontend (e.g., `PricingSection.tsx`, `home.tsx`) when pricing information is needed.
-    ```javascript
-    // Frontend invocation example
-    const { data, error } = await supabase.functions.invoke("get-plans"); 
-    ```
--   **Logic**:
-    1.  Handles CORS preflight (`OPTIONS`) requests.
-    2.  Initializes the Stripe client using `STRIPE_SECRET_KEY` (live key in production).
-    3.  Calls `stripe.prices.list({ active: true, expand: ['data.product'] })` to retrieve active prices and associated product details.
-    4.  Returns the list of plan/price objects as a JSON response with enhanced metadata.
--   **Key Environment Variables**: `STRIPE_SECRET_KEY` (Live key for production).
--   **Returns**: A JSON array of Stripe Price objects with enhanced plan information.
-    ```json
-    // Example structure with correct pricing
-    [
+    return new Response(JSON.stringify(prices.data), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+});
+```
+
+**Response Format**:
+```typescript
+interface PlanResponse {
+  id: string;
+  object: string;
+  active: boolean;
+  currency: string;
+  unit_amount: number;
+  recurring: {
+    interval: string;
+    interval_count: number;
+  };
+  product: {
+    id: string;
+    name: string;
+    description?: string;
+    metadata: Record<string, string>;
+  };
+}
+```
+
+### 3.2. `create-checkout` Function
+
+**Purpose**: Create Stripe Checkout Sessions for subscription purchases
+
+**Key Features**:
+- Customer management (create or retrieve existing)
+- Subscription mode checkout sessions
+- User metadata embedding for webhook processing
+- Promotion code support
+- Success/cancel URL configuration
+
+**Implementation Highlights**:
+```typescript
+// Customer management
+let customer;
+try {
+  const customers = await stripe.customers.list({
+    email: userEmail,
+    limit: 1,
+  });
+  
+  if (customers.data.length > 0) {
+    customer = customers.data[0];
+  } else {
+    customer = await stripe.customers.create({
+      email: userEmail,
+      metadata: { userId },
+    });
+  }
+} catch (error) {
+  throw new Error(`Customer management failed: ${error.message}`);
+}
+
+// Checkout session creation
+const session = await stripe.checkout.sessions.create({
+  customer: customer.id,
+  line_items: [{ price: priceId, quantity: 1 }],
+  mode: 'subscription',
+  allow_promotion_codes: true,
+  success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+  cancel_url: `${origin}/profile?canceled=true`,
+  metadata: {
+    userId,
+    userEmail,
+    checkoutType: 'subscription',
+  },
+});
+```
+
+**Request Format**:
+```typescript
+interface CheckoutRequest {
+  priceId: string;
+  userId: string;
+  userEmail: string;
+  returnUrlPath?: string;
+}
+```
+
+### 3.3. `payments-webhook` Function
+
+**Purpose**: Process Stripe webhook events for subscription lifecycle management
+
+**Enhanced Features**:
+- Generation preservation across plan changes
+- Comprehensive event handling
+- Atomic database operations
+- Error recovery mechanisms
+
+#### 3.3.1. Supported Events
+
+**`checkout.session.completed`**:
+- New subscription activation
+- User plan assignment
+- Generation limit configuration
+- Database record creation
+
+**`customer.subscription.updated`**:
+- Plan change processing
+- Generation preservation logic
+- Subscription status updates
+- Billing period management
+
+**`customer.subscription.deleted`**:
+- Subscription cancellation handling
+- Plan downgrade to free tier
+- Generation limit adjustment
+- Status cleanup
+
+#### 3.3.2. Generation Preservation Logic
+
+```typescript
+async function handleSubscriptionUpdate(supabaseClient: any, event: any) {
+  const subscription = event.data.object;
+  
+  // Get current user data for generation preservation
+  const { data: currentUserData } = await supabaseClient
+    .from('users')
+    .select('current_plan_id, generation_limit, generations_used')
+    .eq('stripe_customer_id', subscription.customer)
+    .single();
+
+  if (currentUserData) {
+    // Calculate unused generations
+    const unusedGenerations = Math.max(0, 
+      currentUserData.generation_limit - currentUserData.generations_used
+    );
+
+    // Determine new plan limits
+    const newPlanLimits = getPlanLimits(subscription.items.data[0].price.id);
+    const preservedLimit = newPlanLimits.base + unusedGenerations;
+
+    // Update user with preserved generations
+    await supabaseClient
+      .from('users')
+      .update({
+        current_plan_id: newPlanLimits.planId,
+        generation_limit: preservedLimit,
+        generations_used: unusedGenerations, // Preserve as used count
+        subscription_status: subscription.status,
+        updated_at: new Date().toISOString()
+      })
+      .eq('stripe_customer_id', subscription.customer);
+  }
+}
+```
+
+#### 3.3.3. Error Handling and Recovery
+
+```typescript
+// Comprehensive error handling with fallback strategies
+try {
+  // Primary update attempt
+  const result = await supabaseClient
+    .from('users')
+    .update(updateData)
+    .eq('id', userId);
+
+  if (result.error) {
+    // Fallback to SQL function
+    const { error: sqlError } = await supabaseClient.rpc(
+      'update_user_plan',
       {
-        "id": "price_1RTkaDDa07Wwp5KNnZF36GsC", // Basic Plan Price ID
-        "object": "price",
-        "active": true,
-        "amount": 3900, // $39.00 in cents
-        "currency": "usd",
-        "interval": "month",
-        "product": "prod_SOXfKdwnyRuvc3", // Product ID or expanded Product object
-        "nickname": "Basic Plan",
-        "generation_limit": 30
-      },
-      {
-        "id": "price_1RTka9Da07Wwp5KNiRxFGnsG", // Pro Plan Price ID
-        "object": "price",
-        "active": true,
-        "amount": 9900, // $99.00 in cents
-        "currency": "usd",
-        "interval": "month",
-        "product": "prod_SOXfKdwnyRuvc4", // Product ID or expanded Product object
-        "nickname": "Pro Plan",
-        "generation_limit": 100
-      }
-    ]
-    ```
-
-## 2. `create-checkout` (Enhanced)
-
--   **File**: `supabase/functions/create-checkout/index.ts`
--   **Purpose**: To create Stripe Checkout Sessions with enhanced support for upgrades, renewals, and plan selection.
--   **Trigger**: Called by the frontend from multiple sources:
-    - Profile page billing management
-    - Pricing section plan selection
-    - Upgrade dialogs
-    ```javascript
-    // Frontend invocation example
-    const { data, error } = await supabase.functions.invoke(
-      "create-checkout",
-      {
-        body: {
-          price_id: "price_1RTkaDDa07Wwp5KNnZF36GsC", // Live Price ID
-          user_id: "auth_user_id_xxxx",
-          return_url: `${window.location.origin}/profile`,
-          checkout_type: "upgrade" // or "renewal", "new_subscription"
-        },
-        headers: {
-          "X-Customer-Email": "user@example.com"
-        }
+        user_id_param: userId,
+        plan_id_param: planId,
+        limit_param: generationLimit
       }
     );
-    ```
--   **Enhanced Logic**:
-    1.  Handles CORS and input validation.
-    2.  Extracts `price_id`, `user_id`, `return_url`, and `checkout_type` from the request body.
-    3.  Initializes Stripe client (using live `STRIPE_SECRET_KEY` in production).
-    4.  **Customer Management**: 
-        - Retrieves or creates Stripe customer
-        - Links customer to user account
-        - Handles existing subscription scenarios
-    5.  **Checkout Session Creation** with enhanced features:
-        -   `customer`: The Stripe Customer ID
-        -   `payment_method_types`: [`'card'`]
-        -   `line_items`: Contains the correct Price ID and quantity
-        -   `mode`: `'subscription'`
-        -   `success_url`: Points to production frontend URL with session tracking
-        -   `cancel_url`: Proper fallback URL
-        -   `allow_promotion_codes`: `true` (enables coupon/discount codes)
-        -   `metadata`: Enhanced metadata for webhook processing:
-            ```typescript
-            metadata: {
-              user_id: user_id,
-              checkout_type: checkout_type,
-              previous_plan: currentPlanId,
-              timestamp: new Date().toISOString()
-            }
-            ```
-    6.  Returns the Stripe Checkout Session URL with additional metadata.
--   **Key Environment Variables**: `STRIPE_SECRET_KEY` (Live key for production).
--   **Enhanced Features**:
-    - Support for upgrade/renewal/new subscription flows
-    - Proper customer management
-    - Enhanced metadata for webhook processing
-    - Validation of plan transitions
--   **Returns**: `{ "url": "<stripe_checkout_session_url>", "session_id": "<session_id>" }`
 
-## 3. `process-lab-result` / `process-lab-result-long`
-
--   **File**: `supabase/functions/process-lab-result/index.ts` and `supabase/functions/process-lab-result-long/index.ts`.
--   **Purpose**: To process an uploaded COA PDF: extract text, generate an SEO-friendly description using an AI model, and save the result.
--   **Trigger**: Called by the frontend (`uploadToSupabase` function in `UploadPage.tsx`) after a file is successfully uploaded to Supabase Storage and its initial metadata record is created in `lab_results` with `status: 'processing'`.
-    ```javascript
-    // Frontend invocation example
-    const { error: functionError } = await supabase.functions.invoke(
-      isLongAnalysis ? 'process-lab-result-long' : 'process-lab-result',
-      {
-        body: {
-          pdfStoragePath: "user_id/timestamp-filename.pdf",
-          labResultId: "uuid_for_lab_results_record"
-        }
-      }
-    );
-    ```
--   **Logic**:
-    1.  Handles CORS.
-    2.  Extracts `pdfStoragePath` and `labResultId` from the request body.
-    3.  **Download PDF**: Downloads the PDF file from Supabase Storage using the `pdfStoragePath`.
-        ```typescript
-        // Example using Supabase client (service role might be needed for direct access)
-        // const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
-        // const { data: fileData, error: downloadError } = await supabaseAdmin.storage.from('labresults').download(pdfStoragePath);
-        ```
-    4.  **PDF Text Extraction**: Uses a PDF parsing library (e.g., `pdf-parse` adapted for Deno, or a WASM-based solution) to extract raw text from the downloaded PDF buffer.
-    5.  **AI Content Generation**:
-        a.  Initializes an AI client (e.g., OpenAI) using `OPENAI_API_KEY`.
-        b.  Constructs a prompt for the AI model, including the extracted text and instructions to generate an SEO-friendly description. The prompt might differ between the short and long analysis versions.
-        c.  Sends the prompt to the AI model (e.g., GPT-3.5-turbo, GPT-4).
-        d.  Receives the generated description from the AI.
-    6.  **Update Database**: Updates the `lab_results` table for the given `labResultId`:
-        -   Sets `description` to the AI-generated content.
-        -   Sets `status` to `'completed'`.
-        -   Optionally saves `raw_text`.
-    7.  If any step fails (download, parsing, AI call, DB update), it updates the `lab_results` record `status` to `'error'` and logs the error.
-    8.  Returns a success or error JSON response. The frontend typically relies on polling the `lab_results` table for the final status and description, so the function's direct return might just confirm invocation.
--   **Key Environment Variables**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (if admin client is used), `OPENAI_API_KEY` (or equivalent for other AI services).
--   **Interactions**:
-    -   Reads files from Supabase Storage (`labresults` bucket).
-    -   Writes `description`, `status`, `raw_text` to the `lab_results` table.
-    -   Calls external AI/LLM API.
--   **Returns**: Typically a simple success/error message, as the main result is written to the database and polled by the frontend.
-    ```json
-    // Example success
-    { "message": "Processing initiated for labResultId: <uuid>" }
-    // Example error during function execution (before DB update to 'error')
-    { "error": "Failed to process PDF: <reason>" }
-    ```
-
-## 4. `payments-webhook` (Enhanced)
-
--   **File**: `supabase/functions/payments-webhook/index.ts`
--   **Purpose**: Enhanced webhook handler for Stripe events with generation preservation and smart subscription management.
--   **Trigger**: Triggered by Stripe when specific events occur (configured in Stripe webhook settings for the live environment).
--   **Enhanced Logic**:
-    1.  Handles CORS (though less critical for webhooks, still good practice for testing).
-    2.  **Verify Stripe Signature**: Crucial for security. Reads the `Stripe-Signature` header and the raw request body. Uses `stripe.webhooks.constructEvent` with the live `STRIPE_WEBHOOK_SECRET` (from environment variables) to verify the event's authenticity.
-        ```typescript
-        // const signature = req.headers.get('Stripe-Signature');
-        // const body = await req.text(); // Raw body
-        // let event;
-        // try {
-        //   event = stripe.webhooks.constructEvent(body, signature, Deno.env.get('STRIPE_WEBHOOK_SECRET'));
-        // } catch (err) {
-        //   return new Response(`Webhook Error: ${err.message}`, { status: 400 });
-        // }
-        // Note: For production, STRIPE_WEBHOOK_SECRET must be the live webhook signing secret from Stripe.
-        ```
-    3.  **Enhanced Event Handling**: Uses a `switch` statement on `event.type` with improved logic:
-        
-        -   **`checkout.session.completed`**: Occurs when a user successfully completes a Stripe Checkout Session.
-            -   Extract `stripe_customer_id` and `subscription_id` from the session object (`event.data.object`).
-            -   Extract `user_id` and `checkout_type` from session `metadata`.
-            -   **Generation Preservation Logic**: 
-                ```typescript
-                // Get current user data to preserve unused generations
-                const { data: currentUserData } = await supabaseClient
-                  .from('users')
-                  .select('current_plan_id, generation_limit, generations_used')
-                  .eq('id', userToUpdate.id)
-                  .single();
-
-                let newGenerationLimit = generationLimit;
-                let newGenerationsUsed = 0;
-
-                // If user has unused generations, preserve them
-                if (currentUserData && currentUserData.generations_used < currentUserData.generation_limit) {
-                  const unusedGenerations = currentUserData.generation_limit - currentUserData.generations_used;
-                  newGenerationLimit = generationLimit + unusedGenerations;
-                  newGenerationsUsed = unusedGenerations;
-                }
-                ```
-            -   Update the `users` table with preserved generations and new plan information.
-            -   Create subscription record in `subscriptions` table for detailed tracking.
-        
-        -   **`customer.subscription.created` / `customer.subscription.updated`**: Enhanced subscription change handling.
-            -   Extract subscription details including `plan.id` (Stripe Price ID) and `status`.
-            -   **Smart Plan Detection**: Map Stripe Price IDs to plan names:
-                ```typescript
-                const priceIdToPlanName = {
-                  'price_1RTkaDDa07Wwp5KNnZF36GsC': 'basic',
-                  'price_1RTka9Da07Wwp5KNiRxFGnsG': 'pro'
-                };
-                ```
-            -   **Generation Limit Mapping**: Set correct generation limits:
-                ```typescript
-                const planToGenerationLimit = {
-                  'basic': 30,
-                  'pro': 100,
-                  'free': 10
-                };
-                ```
-            -   Apply generation preservation logic for plan changes.
-            -   Update both `users` and `subscriptions` tables.
-        
-        -   **`customer.subscription.deleted`**: Enhanced cancellation handling.
-            -   Extract `customer` (Stripe Customer ID) and `status`.
-            -   Find the user by `stripe_customer_id`.
-            -   Set `subscription_status` to `'canceled'`.
-            -   Set `current_plan_id` to `'free'` (downgrade to free plan).
-            -   Set `generation_limit` to free tier limit (10).
-            -   Preserve any unused generations up to the free tier limit.
-        
-        -   **`invoice.payment_succeeded`**: Handle successful recurring payments.
-            -   Confirm ongoing subscription payments.
-            -   Reset `generations_used` for new billing period if applicable.
-            -   Update subscription period information.
-        
-        -   **`invoice.payment_failed`**: Handle failed payments.
-            -   Update subscription status to reflect payment issues.
-            -   Potentially restrict access based on payment failure policies.
-    
-    4.  **Enhanced Database Operations**:
-        -   **Atomic Updates**: Use transactions for complex operations.
-        -   **Fallback Mechanisms**: SQL functions for direct database updates if needed.
-        -   **Detailed Logging**: Comprehensive logging for debugging and monitoring.
-    
-    5.  Returns a `200 OK` response to Stripe to acknowledge receipt of the event.
-
--   **Key Environment Variables**: 
-    - `STRIPE_SECRET_KEY` (Live key)
-    - `STRIPE_WEBHOOK_SECRET` (Live key)
-    - `SUPABASE_URL`
-    - `SUPABASE_SERVICE_ROLE_KEY` (for Supabase admin client)
-
--   **Enhanced Features**:
-    - **Generation Preservation**: Unused generations are preserved across plan changes
-    - **Smart Plan Management**: Proper handling of upgrades, downgrades, and renewals
-    - **Detailed Subscription Tracking**: Comprehensive subscription state management
-    - **Error Handling**: Robust error handling with fallback mechanisms
-    - **Audit Trail**: Detailed logging for subscription changes
-
--   **Interactions**:
-    -   Reads/writes to the `users` table in Supabase with generation preservation
-    -   Manages the `subscriptions` table for detailed subscription tracking
-    -   Interacts with the Stripe API using live keys
-    -   Calls SQL functions for atomic database operations
-
--   **Returns**: `200 OK` to Stripe with detailed response body for debugging:
-    ```json
-    {
-      "received": true,
-      "event_type": "checkout.session.completed",
-      "user_updated": true,
-      "generations_preserved": 5,
-      "new_plan": "pro",
-      "timestamp": "2024-01-01T00:00:00Z"
+    if (sqlError) {
+      throw new Error(`Both update methods failed: ${sqlError.message}`);
     }
-    ```
+  }
+} catch (error) {
+  console.error('Subscription update failed:', error);
+  // Return 200 to prevent Stripe retries for valid but failed operations
+  return new Response(JSON.stringify({ 
+    received: true, 
+    warning: error.message 
+  }), { status: 200 });
+}
+```
 
-## 5. Recent Enhancements
+### 3.4. `admin-operations` Function *(NEW)*
 
-### 5.1. Generation Preservation System
-- **Smart Logic**: Preserves unused generations when users upgrade or renew plans
-- **Fair Billing**: Users don't lose value when changing plans
-- **Atomic Operations**: Database transactions ensure data consistency
+**Purpose**: Comprehensive admin operations with secure service role access
 
-### 5.2. Enhanced Subscription Management
-- **Multi-Plan Support**: Proper handling of Basic ($39) and Pro ($99) plans
-- **Status Management**: Smart account status determination based on plan types
-- **Subscription Tracking**: Detailed subscription state management
+**Security Model**:
+- JWT authentication verification
+- Admin role checking via `is_admin()` function
+- Service role database access
+- Comprehensive audit logging
 
-### 5.3. Improved Error Handling
-- **Fallback Mechanisms**: SQL functions for direct database updates
-- **Comprehensive Logging**: Detailed logging for debugging and monitoring
-- **Graceful Degradation**: Proper error handling with user-friendly responses
+#### 3.4.1. Authentication and Authorization
 
-### 5.4. Security Enhancements
-- **Webhook Verification**: Proper signature verification for all webhook events
-- **Input Validation**: Comprehensive input validation and sanitization
-- **Environment Security**: Proper handling of live API keys and secrets
+```typescript
+serve(async (req) => {
+  // Handle CORS
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
 
-These Edge Functions form the core of the enhanced backend logic, enabling dynamic data retrieval, secure interactions with Stripe, AI-powered content generation, and sophisticated subscription management with generation preservation. The recent enhancements focus on creating a fair, user-friendly billing system while maintaining data integrity and security. 
+  try {
+    // Initialize Supabase client with service role
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+      }
+    );
+
+    // Verify JWT authentication
+    const authorization = req.headers.get('Authorization');
+    if (!authorization) {
+      throw new Error('Missing authorization header');
+    }
+
+    const jwt = authorization.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
+    
+    if (authError || !user) {
+      throw new Error('Invalid authentication');
+    }
+
+    // Verify admin privileges
+    const { data: isAdminData, error: adminError } = await supabase.rpc('is_admin', {
+      user_email: user.email
+    });
+
+    if (adminError || !isAdminData) {
+      throw new Error('Insufficient permissions');
+    }
+
+    // Process admin operation
+    const requestData = await req.json();
+    return await handleAdminOperation(supabase, requestData);
+
+  } catch (error) {
+    console.error('Admin operation error:', error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+});
+```
+
+#### 3.4.2. Supported Admin Operations
+
+**Update User Plan**:
+```typescript
+interface UpdateUserPlanRequest {
+  action: 'update_user_plan';
+  userId: string;
+  planId: 'free' | 'basic' | 'pro';
+  generationLimit: number;
+}
+
+async function handleUpdateUserPlan(supabase: any, request: UpdateUserPlanRequest) {
+  const { userId, planId, generationLimit } = request;
+
+  // Convert user_id string to UUID for database function
+  const { data: userData, error: userError } = await supabase
+    .from('users')
+    .select('id')
+    .eq('user_id', userId)
+    .single();
+
+  if (userError || !userData) {
+    throw new Error(`User not found: ${userError?.message || 'No user data'}`);
+  }
+
+  // Call database function with proper UUID
+  const { data, error } = await supabase.rpc('update_user_plan', {
+    user_id_param: userData.id,  // UUID instead of string
+    plan_id_param: planId,
+    limit_param: generationLimit
+  });
+
+  if (error) {
+    throw new Error(`Failed to update user plan: ${error.message}`);
+  }
+
+  // Log admin action
+  await logAdminAction(supabase, 'update_subscription', userId, {
+    planId,
+    generationLimit
+  });
+
+  return new Response(JSON.stringify({ success: true, data }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+```
+
+**Get Users with Pagination**:
+```typescript
+interface GetUsersRequest {
+  action: 'get_users';
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  planFilter?: string;
+}
+
+async function handleGetUsers(supabase: any, request: GetUsersRequest) {
+  const { page = 1, pageSize = 50, search, planFilter } = request;
+  const offset = (page - 1) * pageSize;
+
+  let query = supabase
+    .from('admin_user_overview')
+    .select('*', { count: 'exact' });
+
+  // Apply search filters
+  if (search) {
+    query = query.or(`email.ilike.%${search}%,full_name.ilike.%${search}%`);
+  }
+
+  // Apply plan filters
+  if (planFilter && planFilter !== 'all') {
+    query = query.eq('current_plan_id', planFilter);
+  }
+
+  // Apply pagination and ordering
+  query = query
+    .range(offset, offset + pageSize - 1)
+    .order('created_at', { ascending: false });
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    throw new Error(`Failed to fetch users: ${error.message}`);
+  }
+
+  return new Response(JSON.stringify({
+    data,
+    pagination: { page, pageSize, total: count || 0 }
+  }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+```
+
+**Delete User**:
+```typescript
+interface DeleteUserRequest {
+  action: 'delete_user';
+  userId: string;
+}
+
+async function handleDeleteUser(supabase: any, request: DeleteUserRequest) {
+  const { userId } = request;
+
+  // Delete related data first (cascade deletion)
+  await supabase.from('lab_results').delete().eq('user_id', userId);
+  await supabase.from('subscriptions').delete().eq('user_id', userId);
+  
+  // Delete from users table
+  const { error } = await supabase.from('users').delete().eq('user_id', userId);
+
+  if (error) {
+    throw new Error(`Failed to delete user: ${error.message}`);
+  }
+
+  // Log admin action
+  await logAdminAction(supabase, 'delete_user', userId, {});
+
+  return new Response(JSON.stringify({ success: true }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+```
+
+**Get Analytics**:
+```typescript
+interface GetAnalyticsRequest {
+  action: 'get_analytics';
+  type: 'user_growth' | 'platform_metrics';
+  period?: 'week' | 'month' | 'year';
+}
+
+async function handleGetAnalytics(supabase: any, request: GetAnalyticsRequest) {
+  const { type, period = 'month' } = request;
+
+  switch (type) {
+    case 'user_growth':
+      const { data: userGrowth, error: growthError } = await supabase
+        .from('admin_user_analytics')
+        .select('*')
+        .order('registration_date', { ascending: false })
+        .limit(period === 'week' ? 7 : period === 'month' ? 30 : 365);
+
+      if (growthError) {
+        throw new Error(`Failed to fetch user growth data: ${growthError.message}`);
+      }
+
+      return new Response(JSON.stringify({ data: userGrowth }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+
+    case 'platform_metrics':
+      // Aggregate platform metrics
+      const { data: userStats, error: statsError } = await supabase
+        .from('users')
+        .select('current_plan_id');
+
+      if (statsError) {
+        throw new Error(`Failed to fetch platform metrics: ${statsError.message}`);
+      }
+
+      const metrics = {
+        totalUsers: userStats.length,
+        freeUsers: userStats.filter(u => u.current_plan_id === 'free').length,
+        basicUsers: userStats.filter(u => u.current_plan_id === 'basic').length,
+        proUsers: userStats.filter(u => u.current_plan_id === 'pro').length,
+        activeSubscribers: userStats.filter(u => u.current_plan_id !== 'free').length,
+      };
+
+      // Get total uploads
+      const { count: totalUploads } = await supabase
+        .from('lab_results')
+        .select('*', { count: 'exact', head: true });
+
+      metrics.totalUploads = totalUploads || 0;
+
+      return new Response(JSON.stringify({ data: metrics }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+
+    default:
+      throw new Error('Invalid analytics type');
+  }
+}
+```
+
+#### 3.4.3. Audit Logging
+
+```typescript
+async function logAdminAction(
+  supabase: any, 
+  action: string, 
+  targetUserId: string, 
+  details: any
+) {
+  const logEntry = {
+    action,
+    targetUserId,
+    details,
+    timestamp: new Date().toISOString()
+  };
+
+  // Log to console for now (can be extended to database logging)
+  console.log('Admin action:', logEntry);
+
+  // Future: Insert into admin_audit_log table
+  // await supabase.from('admin_audit_log').insert(logEntry);
+}
+```
+
+## 4. Error Handling Strategies
+
+### 4.1. Graceful Degradation
+
+```typescript
+// Webhook processing with graceful degradation
+try {
+  await processWebhookEvent(event);
+  return new Response(JSON.stringify({ received: true }), { status: 200 });
+} catch (error) {
+  console.error('Webhook processing failed:', error);
+  
+  // Return success to prevent Stripe retries for non-retryable errors
+  if (error.message.includes('user not found')) {
+    return new Response(JSON.stringify({ 
+      received: true, 
+      warning: 'User not found but event acknowledged' 
+    }), { status: 200 });
+  }
+  
+  // Return error for retryable issues
+  return new Response(JSON.stringify({ error: error.message }), { 
+    status: 500 
+  });
+}
+```
+
+### 4.2. Input Validation
+
+```typescript
+function validateAdminRequest(request: any): AdminRequest {
+  if (!request.action) {
+    throw new Error('Missing action parameter');
+  }
+
+  switch (request.action) {
+    case 'update_user_plan':
+      if (!request.userId || !request.planId || !request.generationLimit) {
+        throw new Error('Missing required parameters for update_user_plan');
+      }
+      if (!['free', 'basic', 'pro'].includes(request.planId)) {
+        throw new Error('Invalid plan ID');
+      }
+      if (typeof request.generationLimit !== 'number' || request.generationLimit < 0) {
+        throw new Error('Invalid generation limit');
+      }
+      break;
+    
+    // Additional validation for other actions...
+  }
+
+  return request as AdminRequest;
+}
+```
+
+## 5. Performance Optimization
+
+### 5.1. Cold Start Optimization
+
+```typescript
+// Minimize imports and dependencies
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.0";
+
+// Cache frequently used objects
+let supabaseClient: any = null;
+
+function getSupabaseClient() {
+  if (!supabaseClient) {
+    supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+  }
+  return supabaseClient;
+}
+```
+
+### 5.2. Database Query Optimization
+
+```typescript
+// Use selective field queries
+const { data } = await supabase
+  .from('admin_user_overview')
+  .select('id, email, current_plan_id, generation_limit, generations_used')
+  .range(offset, offset + pageSize - 1);
+
+// Use indexed columns for filtering
+query = query.eq('current_plan_id', planFilter); // indexed column
+```
+
+## 6. Security Considerations
+
+### 6.1. Authentication Layers
+
+1. **JWT Verification**: Validate user authentication token
+2. **Admin Authorization**: Check admin privileges via database function
+3. **Service Role Access**: Use elevated privileges for admin operations
+4. **Input Validation**: Validate all parameters and sanitize inputs
+
+### 6.2. Rate Limiting
+
+```typescript
+// Implement basic rate limiting for admin operations
+const RATE_LIMIT = 100; // requests per minute
+const rateLimitMap = new Map();
+
+function checkRateLimit(userEmail: string): boolean {
+  const now = Date.now();
+  const userRequests = rateLimitMap.get(userEmail) || [];
+  
+  // Remove old requests (older than 1 minute)
+  const recentRequests = userRequests.filter(
+    (timestamp: number) => now - timestamp < 60000
+  );
+  
+  if (recentRequests.length >= RATE_LIMIT) {
+    return false;
+  }
+  
+  recentRequests.push(now);
+  rateLimitMap.set(userEmail, recentRequests);
+  return true;
+}
+```
+
+## 7. Monitoring and Debugging
+
+### 7.1. Comprehensive Logging
+
+```typescript
+// Structured logging for better monitoring
+function logOperation(operation: string, details: any, success: boolean) {
+  const logData = {
+    timestamp: new Date().toISOString(),
+    operation,
+    details,
+    success,
+    function: 'admin-operations'
+  };
+  
+  console.log(JSON.stringify(logData));
+}
+```
+
+### 7.2. Error Tracking
+
+```typescript
+// Enhanced error reporting
+function handleError(error: any, context: string) {
+  const errorData = {
+    message: error.message,
+    stack: error.stack,
+    context,
+    timestamp: new Date().toISOString()
+  };
+  
+  console.error('Function Error:', errorData);
+  
+  // Future: Send to error tracking service
+  // await sendToErrorTracking(errorData);
+}
+```
+
+## 8. Future Enhancements
+
+### 8.1. Real-time Capabilities
+
+- WebSocket integration for real-time admin dashboard updates
+- Push notifications for critical admin events
+- Live user activity monitoring
+
+### 8.2. Advanced Analytics
+
+- Custom date range queries
+- Export capabilities for admin data
+- Advanced filtering and sorting options
+
+### 8.3. Audit Trail Enhancement
+
+- Complete admin action logging to database
+- Action rollback capabilities
+- Comprehensive security event tracking
+
+This comprehensive Edge Functions system provides a robust, secure, and scalable backend infrastructure for the StrainInsights application, with particular emphasis on the powerful admin operations system that enables effective platform management. 
